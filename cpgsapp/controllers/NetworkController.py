@@ -6,6 +6,7 @@
 
 
 # Importing functions
+import json
 import socket
 import subprocess
 import time
@@ -13,7 +14,14 @@ from cpgsapp.controllers.FileSystemContoller import get_space_info
 from cpgsapp.models import NetworkSettings, SpaceInfo
 from cpgsapp.serializers import NetworkSettingsSerializer
 from storage import Variables
+import paho.mqtt.client as mqtt
 
+
+NetworkSetting = NetworkSettings.objects.first()
+broker = NetworkSetting.server_ip  # You can use your own broker
+port = NetworkSetting.server_port
+client = mqtt.Client()
+client.connect(broker, port, keepalive=60)
 
 # Helper funtin to chumk the data
 def chunk_data(image_data, chunk_size):
@@ -25,35 +33,43 @@ def chunk_data(image_data, chunk_size):
 
 
 # Update the main server when there is a dectectin in the monitoring spaces
-def update_server(spaceId, status, licenseplate):
-    """Detects changes in space status and updates the main server."""
-    # print(status , 'updating')
-    # current_spaces = get_space_info()
-    
-    # print("change confirmed", status)
-    # if current_spaces != {}:
-    NetworkSetting = NetworkSettings.objects.first()
-    # space = SpaceInfo.objects.get(space_id = spaceId)
-        # for space in range(Variables.TOTALSPACES):
-            # check in which space the change is happened
-    # print(current_spaces[spaceId]['spaceStatus'] , Variables.LAST_SPACES[spaceId]['spaceStatus'])
-    # if current_spaces[spaceId]['spaceStatus'] != Variables.LAST_SPACES[spaceId]['spaceStatus']:
+# def update_server(spaceId, status, licenseplate):
+#     """Detects changes in space status and updates the main server."""
+#     NetworkSetting = NetworkSettings.objects.first()
+#     data_to_send = {
+#         "spaceID": spaceId,
+#         "spaceStatus": status,
+#         "licensePlate": licenseplate
+#     }
+#     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+#     CHUNK_SIZE = 20
+#     MESSAGE = f"{data_to_send}".encode()    
+#     chunks = chunk_data(MESSAGE, CHUNK_SIZE)
+#     for chuck in chunks:
+#         sock.sendto(chuck, (NetworkSetting.server_ip, NetworkSetting.server_port))
+#     sock.close()
+#     print("Dectection update send to server - spaceID : ",data_to_send['spaceID'], ", status : ",data_to_send['spaceStatus'], ", server Address : ", NetworkSetting.server_ip, ":", NetworkSetting.server_port)
 
-        # changeDetectedSpace = current_spaces[spaceId]
+
+def update_server(spaceId, status, licenseplate):
+    
+    # NetworkSetting = NetworkSettings.objects.first()
     data_to_send = {
         "spaceID": spaceId,
         "spaceStatus": status,
         "licensePlate": licenseplate
     }
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    CHUNK_SIZE = 20
-    MESSAGE = f"{data_to_send}".encode()    
-    chunks = chunk_data(MESSAGE, CHUNK_SIZE)
-    for chuck in chunks:
-        sock.sendto(chuck, (NetworkSetting.server_ip, NetworkSetting.server_port))
-    sock.close()
-    print("Dectection update send to server - spaceID : ",data_to_send['spaceID'], ", status : ",data_to_send['spaceStatus'], ", server Address : ", NetworkSetting.server_ip, ":", NetworkSetting.server_port)
-    # break
+    topic = "cpgs"
+    message = json.dumps(data_to_send)
+
+    try:
+        client.publish(topic, message)
+        print("Message published successfully.")
+        # client.disconnect()
+    except socket.error as e:
+        print(f"Failed to connect to MQTT broker: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
 
 
 
