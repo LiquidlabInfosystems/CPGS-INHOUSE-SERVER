@@ -6,14 +6,76 @@
 
 
 # Importing functions
+import json
 import socket
 import subprocess
+from threading import Thread
 import time
 from cpgsapp.controllers.FileSystemContoller import get_space_info
-from cpgsapp.models import NetworkSettings, SpaceInfo
+from cpgsapp.models import Account, NetworkSettings, SpaceInfo
 from cpgsapp.serializers import NetworkSettingsSerializer
 from storage import Variables
+import paho.mqtt.client as mqtt
 
+
+
+
+class Broker:
+    def __init__(self):
+        self.NetworkSetting = NetworkSettings.objects.first()
+        self.broker = self.NetworkSetting.server_ip
+        self.port = self.NetworkSetting.server_port
+        self.client = mqtt.Client()
+        
+        self.client.on_connect = self.on_connect
+        self.client.on_disconnect = self.on_disconnect
+        
+        # Start loop in the background to maintain network traffic
+        self.client.loop_start()
+
+    def on_connect(self, client, userdata, flags, rc):
+        if rc == 0:
+            print("Broker Connected!")
+        else:
+            print(f"Connection failed with code {rc}")
+
+    def on_disconnect(self, client, userdata, rc):
+        print("Disconnected from broker. Trying to reconnect...")
+        self.reconnect()
+
+    def connect(self):
+        try:
+            self.client.connect(self.broker, self.port, keepalive=60)
+        except Exception as e:
+            print(f"Connection error: {e}")
+
+    def reconnect(self):
+        def retry():
+            while True:
+                try:
+                    self.client.reconnect()
+                    break
+                except:
+                    print("Reconnect failed. Retrying in 5 seconds...")
+                    time.sleep(5)
+        Thread(target=retry, daemon=True).start()
+
+    def send(self, topic, message):
+        try:
+            result = self.client.publish(topic, message)
+            if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                print("Message published successfully.")
+            else:
+                print(f"Failed to publish message: {result.rc}")
+        except Exception as e:
+            print(f"Publish error: {e}")
+
+    def disconnect(self):
+        self.client.loop_stop()
+        self.client.disconnect()
+
+mainserverbroker = Broker()
+mainserverbroker.connect()
 
 # Helper funtin to chumk the data
 def chunk_data(image_data, chunk_size):
@@ -24,36 +86,27 @@ def chunk_data(image_data, chunk_size):
 
 
 
-# Update the main server when there is a dectectin in the monitoring spaces
-def update_server(spaceId, status, licenseplate):
-    """Detects changes in space status and updates the main server."""
-    # print(status , 'updating')
-    # current_spaces = get_space_info()
-    
-    # print("change confirmed", status)
-    # if current_spaces != {}:
-    NetworkSetting = NetworkSettings.objects.first()
-    # space = SpaceInfo.objects.get(space_id = spaceId)
-        # for space in range(Variables.TOTALSPACES):
-            # check in which space the change is happened
-    # print(current_spaces[spaceId]['spaceStatus'] , Variables.LAST_SPACES[spaceId]['spaceStatus'])
-    # if current_spaces[spaceId]['spaceStatus'] != Variables.LAST_SPACES[spaceId]['spaceStatus']:
 
-        # changeDetectedSpace = current_spaces[spaceId]
+
+def update_server(spaceId, status, licenseplate):
+    device_id = Account.objects.first().device_id
     data_to_send = {
-        "spaceID": spaceId,
+        "deviceID": str(device_id) + ":" + str(spaceId),
         "spaceStatus": status,
         "licensePlate": licenseplate
     }
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    CHUNK_SIZE = 20
-    MESSAGE = f"{data_to_send}".encode()    
-    chunks = chunk_data(MESSAGE, CHUNK_SIZE)
-    for chuck in chunks:
-        sock.sendto(chuck, (NetworkSetting.server_ip, NetworkSetting.server_port))
-    sock.close()
-    print("Dectection update send to server - spaceID : ",data_to_send['spaceID'], ", status : ",data_to_send['spaceStatus'], ", server Address : ", NetworkSetting.server_ip, ":", NetworkSetting.server_port)
-    # break
+    print(data_to_send)
+    topic = "cpgs"
+    message = json.dumps(data_to_send)
+
+    try:
+        
+        mainserverbroker.send(topic,message)
+        # client.disconnect()
+    except socket.error as e:
+        print(f"Failed to connect to MQTT broker: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
 
 
 

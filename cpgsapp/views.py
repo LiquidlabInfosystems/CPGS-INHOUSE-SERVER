@@ -8,7 +8,7 @@
 import time
 from rest_framework.response import Response
 from django.shortcuts import HttpResponse
-from cpgsapp.controllers.HardwareController import RebootSystem
+from cpgsapp.controllers.HardwareController import RebootSystem, set_pilot_to_green, set_pilot_to_off, set_pilot_to_red
 from cpgsapp.controllers.NetworkController import (
     change_hostname, connect_to_wifi, get_network_settings, 
     set_dynamic_ip, set_static_ip
@@ -52,11 +52,34 @@ def ModeMonitor():
             /////  //       ////// //  ///////
             """                  
     print(text_art)
+    
+    set_pilot_to_off()
+    time.sleep(.5)
+    set_pilot_to_green()
+    time.sleep(.5)
+    set_pilot_to_red()
+    time.sleep(.5)
+    set_pilot_to_off()
+    time.sleep(.5)
+    set_pilot_to_green()
+    time.sleep(.5)
+    set_pilot_to_red()
+    time.sleep(.5)
+    set_pilot_to_off()
+    time.sleep(.5)
+    set_pilot_to_green()
+    time.sleep(.5)
+    set_pilot_to_red()
+    time.sleep(.5)
+    
+    set_pilot_to_off()
+    
     while True:
         time.sleep(1)
         mode = get_mode_info()
         if mode == "live":
             liveMode()
+            # get_monitoring_spaces()
 
 
 
@@ -139,6 +162,7 @@ class AccountHandler(APIView):
             return Response({"status":"Username or password is Required"}, status=HTTP_406_NOT_ACCEPTABLE)
         username = req.data['username']
         password = req.data['password']
+        # device_id = req.data['device_id']
         user = Account.objects.filter(username=username, password=password)
         if user:
             return Response({"token":USER_VALIDATE_TOKEN},status=HTTP_200_OK)
@@ -149,14 +173,16 @@ class AccountHandler(APIView):
         AccountSerialized = AccountSerializer(user)
         return Response({'data':AccountSerialized.data},status=HTTP_200_OK)
     def put(self, req):
-        if 'old_username' not in req.data or 'old_password' not in req.data or 'new_password' not in req.data or 'new_username' not in req.data:
-            return Response({"status":"Username or password is Required"}, status=HTTP_406_NOT_ACCEPTABLE)
+        if 'old_username' not in req.data or 'old_password' not in req.data or 'new_password' not in req.data or 'new_username' not in req.data  or 'device_id' not in req.data:
+            return Response({"status":"Username or password or device_id is Required"}, status=HTTP_406_NOT_ACCEPTABLE)
         new_username = req.data['new_username']
+        device_id = req.data['device_id']
         new_password = req.data['new_password']
         user = Account.objects.first()
         if user:
             user.username = new_username
             user.password = new_password
+            user.device_id = device_id
             user.save()
             serializedUser = AccountSerializer(user)
             return Response({"data":serializedUser.data},status=HTTP_200_OK)

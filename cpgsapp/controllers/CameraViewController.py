@@ -17,16 +17,13 @@ from cpgsapp.controllers.HardwareController import  update_pilot
 from cpgsapp.controllers.NetworkController import update_server
 from cpgsserver.settings import CONFIDENCE_LEVEL, CONSISTENCY_LEVEL, IS_PI_CAMERA_SOURCE
 from storage import Variables
-from storage import Disk
-# from storage.Disk import load_frame_from_binary, save_frame_to_binary
-# licensePlateStorage = InMemory.InMemory()
-# spaceFrameStorage = InMemory.InMemory()
-# InMemory = InMemory()
+# from paddleocr import PaddleOCR
 
-spaceViewStorage = Disk.spaceViewStorage()
-licensePlateStorage = Disk.licensePlateStorage()
-Cspace = {}
+# Initialize PaddleOCR once at module level
+# ocr = PaddleOCR(use_angle_cls=True, lang='en')
 # Camera Input Setup
+
+
 if IS_PI_CAMERA_SOURCE:
     from picamera2 import Picamera2
     Variables.cap = Picamera2()
@@ -36,10 +33,8 @@ if IS_PI_CAMERA_SOURCE:
 else: 
     Variables.cap = cv2.VideoCapture(0)
 
-# queque = FixedFIFO(CONSISTENCY_LEVEL)
 
 
-# helps in converting image from cv2 metrix to base64
 def image_to_base64(frame):
     try:
         frame_contiguous = np.ascontiguousarray(frame)
@@ -111,7 +106,7 @@ def capture():
         return frame
     else:
         print("Invalid frame received")
-    time.sleep(.8)
+    # time.sleep(.8)
 
 
 
@@ -164,6 +159,8 @@ def getSpaceMonitorWithLicensePlateDectection(x, y, w, h ):
         if isLicensePlate:
             # licensePlateStorage.save(frame=licensePlate,spaceID=spaceID)
             licensePlateBase64 = image_to_base64(licensePlate)
+            # licenseNumber = get_ocr(licensePlateBase64)
+            # print(licenseNumber)
             # licensePlateStorage.update_base64(image_to_base64(Variables.licensePlate))
         #     space['spaceStatus'] = "occupied"
         # space['spaceFrame'] = Variables.licensePlateinSpaceInBase64
@@ -187,8 +184,6 @@ def liveMode():
         if len(Variables.CONFIDENCE_QUEUE) != Variables.TOTALSPACES:
             Variables.CONFIDENCE_QUEUE.append(FixedFIFO(CONSISTENCY_LEVEL))
             
-    # Variables.LAST_SPACES = get_space_info()        
-    # update_space_info(Variables.SPACES)
     pilotStatusofEachSpace = []
     for spaceID, pos in enumerate(poslist):
         SpaceCoordinates = np.array([[pos[0][0], pos[0][1]], [pos[1][0], pos[1][1]], [pos[2][0], pos[2][1]], [pos[3][0], pos[3][1]]])
@@ -215,15 +210,21 @@ def liveMode():
                 space.space_status = 'vaccant'
                 update_server(spaceID, 'vaccant', licensePlateBase64)
                 pilotStatusofEachSpace.append(False)
-                    
         space.save()
         
 
     if IS_PI_CAMERA_SOURCE:
+        spaces = SpaceInfo.objects.all()
+        Variables.pilotStatusofEachSpace = []
+        for space in spaces:
+            if space.space_status == "occupied":
+                Variables.pilotStatusofEachSpace.append(True)
+            else:
+                Variables.pilotStatusofEachSpace.append(False)
         
-        if(all(pilotStatusofEachSpace)):
+        # print(Variables.pilotStatusofEachSpace)
+        if(all(Variables.pilotStatusofEachSpace)):
             update_pilot('occupied')
-            
         else:
             update_pilot('vaccant')
 
@@ -239,14 +240,12 @@ def get_monitoring_spaces():
     Variables.TOTALSPACES = len(poslist)
     for spaceID in range(Variables.TOTALSPACES):
         if len(Variables.CONFIDENCE_QUEUE) != Variables.TOTALSPACES:
-            Variables.CONFIDENCE_QUEUE.append(FixedFIFO(CONSISTENCY_LEVEL))
-            
-    # Variables.LAST_SPACES = get_space_info()        
+            Variables.CONFIDENCE_QUEUE.append(FixedFIFO(CONSISTENCY_LEVEL))      
     update_space_info(Variables.SPACES)
     
     response = []
        
-    pilotStatusofEachSpace = []
+    # Variables.pilotStatusofEachSpace = []
     for spaceID, pos in enumerate(poslist):
         SpaceCoordinates = np.array([[pos[0][0], pos[0][1]], [pos[1][0], pos[1][1]], [pos[2][0], pos[2][1]], [pos[3][0], pos[3][1]]])
         pts = np.array(SpaceCoordinates, np.int32)
@@ -258,7 +257,6 @@ def get_monitoring_spaces():
         Vaccency_count = queue.count(False)
         Occupied_confidence = int((Occupied_count/CONSISTENCY_LEVEL)*100)
         Vaccency_confidence = int((Vaccency_count/CONSISTENCY_LEVEL)*100)
-        # print(Occupied_confidence, Vaccency_confidence,spaceID )
         space = SpaceInfo.objects.get(space_id = spaceID)
         
         Variables.Cspace = {
@@ -272,26 +270,37 @@ def get_monitoring_spaces():
                 print('occupied')
                 space.space_status = 'occupied'
                 update_server(spaceID, 'occupied',licensePlateBase64)
-                pilotStatusofEachSpace.append(True)
+                Variables.Cspace["spaceStatus"] = 'occupied'
+                # Variables.pilotStatusofEachSpace.append(True)
                 
         elif Vaccency_confidence == CONFIDENCE_LEVEL:
             if space.space_status == 'occupied':
                 print('vaccant')
                 space.space_status = 'vaccant'
+                Variables.Cspace["spaceStatus"] = 'occupied'
                 update_server(spaceID, 'vaccant', licensePlateBase64)
-                pilotStatusofEachSpace.append(False)
-        
+                # Variables.pilotStatusofEachSpace.append(False)
+                
         space.save()
+        
+        # print(Variables.pilotStatusofEachSpace)
+        if IS_PI_CAMERA_SOURCE:
+            spaces = SpaceInfo.objects.all()
+            Variables.pilotStatusofEachSpace = []
+            for space in spaces:
+                if space.space_status == "occupied":
+                    Variables.pilotStatusofEachSpace.append(True)
+                else:
+                    Variables.pilotStatusofEachSpace.append(False)
+            
+            # print(Variables.pilotStatusofEachSpace)
+            if(all(Variables.pilotStatusofEachSpace)):
+                update_pilot('occupied')
+            else:
+                update_pilot('vaccant')
+        
         response.append(Variables.Cspace)
         
-    # print(response)
-    if IS_PI_CAMERA_SOURCE:
-        
-        if(all(pilotStatusofEachSpace)):
-            update_pilot('vaccant')
-            
-        else:
-            update_pilot('occupied')
   
         
     return response
