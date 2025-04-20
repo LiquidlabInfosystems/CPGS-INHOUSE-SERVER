@@ -11,6 +11,8 @@ from django.views.generic import TemplateView
 from cpgsapp import views
 from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 
+from cpgsapp.controllers.NetworkController import Broker
+
 ThreadalreadyRunning = False
 
 # Endpoints
