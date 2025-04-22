@@ -14,12 +14,12 @@ from storage import Variables
 
 
 # GPIO setup (only if running on a Raspberry Pi)
-if IS_PI_CAMERA_SOURCE:
+try:
     from gpiozero import LED
     GREENLIGHT = LED(2)
     REDLIGHT = LED(3)
     MODEBUTTON = LED(4)
-else:
+except:
     GREENLIGHT = REDLIGHT = None  # Avoid errors if running on non-RPi devices
 
 

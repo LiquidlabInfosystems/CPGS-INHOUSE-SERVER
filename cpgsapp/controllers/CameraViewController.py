@@ -24,15 +24,27 @@ from storage import Variables
 # Camera Input Setup
 
 
-if IS_PI_CAMERA_SOURCE:
+# if IS_PI_CAMERA_SOURCE:
+#     from picamera2 import Picamera2
+#     Variables.cap = Picamera2()
+#     config = Variables.cap.create_preview_configuration(main={"size":(1280, 720)})
+#     Variables.cap.configure(config)
+#     Variables.cap.start()
+# else: 
+#     Variables.cap = cv2.VideoCapture(0)
+
+
+
+try:
+    print('Initializing Pi Camera')
     from picamera2 import Picamera2
     Variables.cap = Picamera2()
     config = Variables.cap.create_preview_configuration(main={"size":(1280, 720)})
     Variables.cap.configure(config)
     Variables.cap.start()
-else: 
+except: 
+    print('Pi Camera not found, Using PC Camera')
     Variables.cap = cv2.VideoCapture(0)
-
 
 
 def image_to_base64(frame):
@@ -90,16 +102,27 @@ async def video_stream_for_calibrate():
 # helps in capturing the frame from physical camera
 def capture():
     """Synchronous capture function optimized for performance."""
-    if IS_PI_CAMERA_SOURCE:
+    # if IS_PI_CAMERA_SOURCE:
+    #     frame = Variables.cap.capture_array()
+    #     if frame is None:
+    #         print("Failed to capture frame from PiCamera")
+    #         time.sleep(0.5)
+    # else:
+    #     ret, frame = Variables.cap.read()
+    #     if not ret:
+    #         print("Failed to capture frame from VideoCapture")
+    #         time.sleep(0.1)
+    try:
         frame = Variables.cap.capture_array()
         if frame is None:
             print("Failed to capture frame from PiCamera")
             time.sleep(0.5)
-    else:
+    except:
         ret, frame = Variables.cap.read()
         if not ret:
             print("Failed to capture frame from VideoCapture")
             time.sleep(0.1)
+            
     frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
     if frame.size > 0:
         frame = cv2.resize(frame, (1280 , 720))
@@ -213,7 +236,7 @@ def liveMode():
         space.save()
         
 
-    if IS_PI_CAMERA_SOURCE:
+    try:
         spaces = SpaceInfo.objects.all()
         Variables.pilotStatusofEachSpace = []
         for space in spaces:
@@ -227,6 +250,8 @@ def liveMode():
             update_pilot('occupied')
         else:
             update_pilot('vaccant')
+    except:
+        print('Pi Features are not available. May be you are not in pi')
 
 
 
@@ -284,7 +309,7 @@ def get_monitoring_spaces():
         space.save()
         
         # print(Variables.pilotStatusofEachSpace)
-        if IS_PI_CAMERA_SOURCE:
+        try:
             spaces = SpaceInfo.objects.all()
             Variables.pilotStatusofEachSpace = []
             for space in spaces:
@@ -298,6 +323,8 @@ def get_monitoring_spaces():
                 update_pilot('occupied')
             else:
                 update_pilot('vaccant')
+        except:
+            print("Pi featues not Available, May be you are not in pi")
         
         response.append(Variables.Cspace)
         
