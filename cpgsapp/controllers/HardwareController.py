@@ -8,7 +8,7 @@
 # Importing functions
 import subprocess
 from . import FileSystemContoller
-from cpgsserver.settings import IS_PI_CAMERA_SOURCE
+# from cpgsserver.settings import IS_PI_CAMERA_SOURCE
 from storage import Variables
 
 
