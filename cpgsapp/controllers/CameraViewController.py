@@ -15,7 +15,7 @@ import numpy as np
 from cpgsapp.controllers.FileSystemContoller import get_space_coordinates, get_space_info, update_space_info
 from cpgsapp.controllers.HardwareController import  update_pilot
 from cpgsapp.controllers.NetworkController import update_server
-from cpgsserver.settings import CONFIDENCE_LEVEL, CONSISTENCY_LEVEL, IS_PI_CAMERA_SOURCE
+from cpgsserver.settings import CONFIDENCE_LEVEL, CONSISTENCY_LEVEL
 from storage import Variables
 # from paddleocr import PaddleOCR
 
