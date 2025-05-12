@@ -17,8 +17,8 @@ class NetworkSettings(models.Model):
     default_ap_ssid = models.CharField(max_length=100, default='LiquidlabCPGSDefaultSSID')
     default_ap_password = models.CharField(max_length=100, default='LiquidlabCPGS')
 
-    server_ip = models.GenericIPAddressField(default='192.168.1.100')
-    server_port = models.PositiveIntegerField(default=9090)
+    server_ip = models.GenericIPAddressField(default='192.168.1.15')
+    server_port = models.PositiveIntegerField(default=1883)
 
     host_name = models.CharField(max_length=50, default='cpgs')
 
@@ -47,4 +47,3 @@ class SpaceInfo(models.Model):
 
     def __str__(self):
         return f"Network Settings ({self.username})"
-

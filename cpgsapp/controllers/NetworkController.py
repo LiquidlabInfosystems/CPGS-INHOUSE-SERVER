@@ -33,19 +33,20 @@ class Broker:
         # Start loop in the background to maintain network traffic
         self.client.loop_start()
 
-    def on_connect(self, client, userdata, flags, rc):
+    def on_connect(self, client, userdata, flags, rc,):
         if rc == 0:
-            print("Broker Connected!")
+            print("✅ Broker Connected!")
         else:
-            print(f"Connection failed with code {rc}")
+            print(f"❌ Connection failed with code {rc} ({mqtt.error_string(rc)})")
 
     def on_disconnect(self, client, userdata, rc):
-        print("Disconnected from broker. Trying to reconnect...")
+        print(f"⚠️ Disconnected (RC: {rc}). Reconnecting...")
         self.reconnect()
 
     def connect(self):
         try:
             self.client.connect(self.broker, self.port, keepalive=60)
+            print(self.broker,self.port)
         except Exception as e:
             print(f"Connection error: {e}")
 
@@ -60,13 +61,17 @@ class Broker:
                     time.sleep(5)
         Thread(target=retry, daemon=True).start()
 
+            
     def send(self, topic, message):
+        if not self.client.is_connected():
+            print("Client not connected. Reconnecting...")
+            self.connect()  # Reconnect if disconnected
         try:
             result = self.client.publish(topic, message)
             if result.rc == mqtt.MQTT_ERR_SUCCESS:
                 print("Message published successfully.")
             else:
-                print(f"Failed to publish message: {result.rc}")
+                print(f"Failed to publish message: {result.rc} (Error: {mqtt.error_string(result.rc)})")
         except Exception as e:
             print(f"Publish error: {e}")
 
@@ -88,15 +93,17 @@ def chunk_data(image_data, chunk_size):
 
 
 
-def update_server(spaceId, status, licenseplate):
+def update_server(slotIndex, status, licenseplate):
     device_id = Account.objects.first().device_id
     data_to_send = {
-        "deviceID": str(device_id) + ":" + str(spaceId),
+        "deviceID": str(device_id) + ":" + str(slotIndex),
         "spaceStatus": status,
         "licensePlate": licenseplate
     }
+    print(device_id)
+    print(slotIndex)
     print(data_to_send)
-    topic = "cpgs"
+    topic = str(device_id) + ":" + str(slotIndex)
     message = json.dumps(data_to_send)
 
     try:
@@ -198,7 +205,7 @@ def saveNetworkSetting(new_settings):
     try:
         command = f"""
         nmcli con modify $(nmcli -g UUID con show --active | head -n 1) \
-        ipv4.method manual \
+        ipv4.method manual 
         ipv4.addresses {new_settings.ipv4_address}/24 \
         ipv4.gateway {new_settings.gateway_address} \
         ipv4.dns "8.8.8.8 8.8.4.4"
@@ -255,5 +262,10 @@ def connect_to_wifi(ssid, password):
      
     except subprocess.CalledProcessError as e:
         print(f"Error connecting to WiFi: {e}")
+
+
+
+# Example: Force-check settings
+print(f"Broker: {mainserverbroker.broker}:{mainserverbroker.port}")
 
 
