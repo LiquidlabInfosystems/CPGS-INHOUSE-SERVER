@@ -3,7 +3,6 @@
 # Version: 1.0
 # Date: 2025-03-08
 # Description: Fullfull the requests comming from servers or other remote devices in the network
-
 # Importing functions
 import time
 from rest_framework.response import Response
