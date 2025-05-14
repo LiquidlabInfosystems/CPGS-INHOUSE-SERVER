@@ -88,15 +88,17 @@ def chunk_data(image_data, chunk_size):
 
 
 
-def update_server(spaceId, status, licenseplate):
+def update_server(slotIndex, status, licenseplate):
     device_id = Account.objects.first().device_id
     data_to_send = {
-        "deviceID": str(device_id) + ":" + str(spaceId),
+        "deviceID": str(device_id) + ":" + str(slotIndex),
         "spaceStatus": status,
         "licensePlate": licenseplate
     }
+    print(device_id)
+    print(slotIndex)
     print(data_to_send)
-    topic = "cpgs"
+    topic = str(device_id) + ":" + str(slotIndex)
     message = json.dumps(data_to_send)
 
     try:
@@ -198,7 +200,7 @@ def saveNetworkSetting(new_settings):
     try:
         command = f"""
         nmcli con modify $(nmcli -g UUID con show --active | head -n 1) \
-        ipv4.method manual \
+        ipv4.method manual 
         ipv4.addresses {new_settings.ipv4_address}/24 \
         ipv4.gateway {new_settings.gateway_address} \
         ipv4.dns "8.8.8.8 8.8.4.4"

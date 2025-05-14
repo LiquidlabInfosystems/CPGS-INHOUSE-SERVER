@@ -66,7 +66,6 @@ def dectect_license_plate(space):
 
 
 
-
 # Function called for calibrating 
 async def video_stream_for_calibrate():
     while True:
@@ -154,10 +153,10 @@ def getSpaceMonitorWithLicensePlateDectection(x, y, w, h ):
         licensePlateinSpace,licensePlate, isLicensePlate =  dectect_license_plate(space_view)
         licensePlateinSpaceInBase64 = image_to_base64(licensePlateinSpace)
         # for space in Variables.SPACES:
-        # if space['spaceID'] == spaceID:
+        # if space['slotIndex'] == slotIndex:
         licensePlateBase64 = ""
         if isLicensePlate:
-            # licensePlateStorage.save(frame=licensePlate,spaceID=spaceID)
+            # licensePlateStorage.save(frame=licensePlate,slotIndex=slotIndex)
             licensePlateBase64 = image_to_base64(licensePlate)
             # licenseNumber = get_ocr(licensePlateBase64)
             # print(licenseNumber)
@@ -165,7 +164,7 @@ def getSpaceMonitorWithLicensePlateDectection(x, y, w, h ):
         #     space['spaceStatus'] = "occupied"
         # space['spaceFrame'] = Variables.licensePlateinSpaceInBase64
         # spaceFrameStorage.update_base64(image_to_base64(Variables.licensePlateinSpace))
-        # spaceViewStorage.save(frame=licensePlateinSpace,spaceID=spaceID)
+        # spaceViewStorage.save(frame=licensePlateinSpace,slotIndex=slotIndex)
         # space['licensePlate'] = Variables.licensePlateBase64
         # update_space_info(Variables.SPACES)
         return isLicensePlate,licensePlateBase64, licensePlateinSpaceInBase64
@@ -180,35 +179,35 @@ def liveMode():
     poslist = get_space_coordinates()
     Variables.SPACES = []
     Variables.TOTALSPACES = len(poslist)
-    for spaceID in range(Variables.TOTALSPACES):
+    for slotIndex in range(Variables.TOTALSPACES):
         if len(Variables.CONFIDENCE_QUEUE) != Variables.TOTALSPACES:
             Variables.CONFIDENCE_QUEUE.append(FixedFIFO(CONSISTENCY_LEVEL))
             
     pilotStatusofEachSpace = []
-    for spaceID, pos in enumerate(poslist):
+    for slotIndex, pos in enumerate(poslist):
         SpaceCoordinates = np.array([[pos[0][0], pos[0][1]], [pos[1][0], pos[1][1]], [pos[2][0], pos[2][1]], [pos[3][0], pos[3][1]]])
         pts = np.array(SpaceCoordinates, np.int32)
         x, y, w, h = cv2.boundingRect(pts)
         isLicensePlate,licensePlateBase64, licensePlateinSpaceInBase64 = getSpaceMonitorWithLicensePlateDectection( x, y, w, h)
-        Variables.CONFIDENCE_QUEUE[spaceID].enqueue(isLicensePlate)
-        queue = Variables.CONFIDENCE_QUEUE[spaceID].get_queue()
+        Variables.CONFIDENCE_QUEUE[slotIndex].enqueue(isLicensePlate)
+        queue = Variables.CONFIDENCE_QUEUE[slotIndex].get_queue()
         Occupied_count = queue.count(True)
         Vaccency_count = queue.count(False)
         Occupied_confidence = int((Occupied_count/CONSISTENCY_LEVEL)*100)
         Vaccency_confidence = int((Vaccency_count/CONSISTENCY_LEVEL)*100)
-        # print(Occupied_confidence, Vaccency_confidence,spaceID )
-        space = SpaceInfo.objects.get(space_id = spaceID)
+        # print(Occupied_confidence, Vaccency_confidence,slotIndex )
+        space = SpaceInfo.objects.get(space_id = slotIndex)
         if Occupied_confidence == CONFIDENCE_LEVEL:
             if space.space_status == 'vaccant':
                 print('occupied')
                 space.space_status = 'occupied'
-                update_server(spaceID, 'occupied',licensePlateBase64)
+                update_server(slotIndex, 'occupied',licensePlateBase64)
                 pilotStatusofEachSpace.append(True)
         elif Vaccency_confidence == CONFIDENCE_LEVEL:
             if space.space_status == 'occupied':
                 print('vaccant')
                 space.space_status = 'vaccant'
-                update_server(spaceID, 'vaccant', licensePlateBase64)
+                update_server(slotIndex, 'vaccant', licensePlateBase64)
                 pilotStatusofEachSpace.append(False)
         space.save()
         
@@ -238,7 +237,7 @@ def get_monitoring_spaces():
     poslist = get_space_coordinates()
     Variables.SPACES = []
     Variables.TOTALSPACES = len(poslist)
-    for spaceID in range(Variables.TOTALSPACES):
+    for slotIndex in range(Variables.TOTALSPACES):
         if len(Variables.CONFIDENCE_QUEUE) != Variables.TOTALSPACES:
             Variables.CONFIDENCE_QUEUE.append(FixedFIFO(CONSISTENCY_LEVEL))      
     update_space_info(Variables.SPACES)
@@ -246,21 +245,21 @@ def get_monitoring_spaces():
     response = []
        
     # Variables.pilotStatusofEachSpace = []
-    for spaceID, pos in enumerate(poslist):
+    for slotIndex, pos in enumerate(poslist):
         SpaceCoordinates = np.array([[pos[0][0], pos[0][1]], [pos[1][0], pos[1][1]], [pos[2][0], pos[2][1]], [pos[3][0], pos[3][1]]])
         pts = np.array(SpaceCoordinates, np.int32)
         x, y, w, h = cv2.boundingRect(pts)
         isLicensePlate,licensePlateBase64, licensePlateinSpaceInBase64 = getSpaceMonitorWithLicensePlateDectection(x, y, w, h)
-        Variables.CONFIDENCE_QUEUE[spaceID].enqueue(isLicensePlate)
-        queue = Variables.CONFIDENCE_QUEUE[spaceID].get_queue()
+        Variables.CONFIDENCE_QUEUE[slotIndex].enqueue(isLicensePlate)
+        queue = Variables.CONFIDENCE_QUEUE[slotIndex].get_queue()
         Occupied_count = queue.count(True)
         Vaccency_count = queue.count(False)
         Occupied_confidence = int((Occupied_count/CONSISTENCY_LEVEL)*100)
         Vaccency_confidence = int((Vaccency_count/CONSISTENCY_LEVEL)*100)
-        space = SpaceInfo.objects.get(space_id = spaceID)
+        space = SpaceInfo.objects.get(space_id = slotIndex)
         
         Variables.Cspace = {
-            "spaceID":spaceID,
+            "slotIndex":slotIndex,
             "spaceStatus":'occupied',
             "spaceFrame":licensePlateinSpaceInBase64,
             "licensePlate":licensePlateBase64
@@ -269,7 +268,7 @@ def get_monitoring_spaces():
             if space.space_status == 'vaccant':
                 print('occupied')
                 space.space_status = 'occupied'
-                update_server(spaceID, 'occupied',licensePlateBase64)
+                update_server(slotIndex, 'occupied',licensePlateBase64)
                 Variables.Cspace["spaceStatus"] = 'occupied'
                 # Variables.pilotStatusofEachSpace.append(True)
                 
@@ -278,7 +277,7 @@ def get_monitoring_spaces():
                 print('vaccant')
                 space.space_status = 'vaccant'
                 Variables.Cspace["spaceStatus"] = 'occupied'
-                update_server(spaceID, 'vaccant', licensePlateBase64)
+                update_server(slotIndex, 'vaccant', licensePlateBase64)
                 # Variables.pilotStatusofEachSpace.append(False)
                 
         space.save()
