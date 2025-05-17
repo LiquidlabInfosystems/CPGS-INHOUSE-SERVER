@@ -35,7 +35,7 @@ class NetworkSettings(models.Model):
 class Account(models.Model):
     username = models.CharField(max_length=100,default="admin")
     password = models.CharField(max_length=100,default="admin")
-    device_id = models.CharField(max_length=100,default="0")
+    device_id = models.CharField(max_length=100,default="1001")
 
     def __str__(self):
         return f"Network Settings ({self.username})"
