@@ -35,6 +35,8 @@ class Broker:
 
     def on_connect(self, client, userdata, flags, rc):
         if rc == 0:
+            # Call this at server startup
+            initialize_and_publish_all_slots()
             print("Broker Connected!")
         else:
             print(f"Connection failed with code {rc}")
@@ -88,35 +90,68 @@ def chunk_data(image_data, chunk_size):
 
 
 
-# Dictionary to store slot data for each device
+# Dictionary structure: {device_id: {slotIndex: {slot_data}}}
 device_slot_data = {}
+
+def initialize_and_publish_all_slots():
+    """Initialize all devices/slots with default values and publish."""
+    devices = Account.objects.all()
+    for device in devices:
+        device_id = device.device_id
+        device_slot_data[device_id] = {}
+        
+        # Initialize slots (example: 10 slots per device)
+        for slot_index in range(0, 3):
+            device_slot_data[device_id][slot_index] = {
+                "slotIndex": slot_index,
+                "spaceStatus": "vacant",
+                "licensePlate": ""
+            }
+        
+        # Prepare message
+        message = {
+            "deviceID": str(device_id),
+            "slots": list(device_slot_data[device_id].values())
+        }
+        
+        # Print the message being published
+        print(f"Publishing to device {device_id}:")
+        print(json.dumps(message, indent=2))
+        
+        try:
+            mainserverbroker.send(str(device_id), json.dumps(message))
+            print(f"Successfully published to {device_id}")
+        except Exception as e:
+            print(f"Failed to publish to {device_id}: {str(e)}")
+
+
 
 def update_server(slotIndex, status, licenseplate):
     device_id = Account.objects.first().device_id
-    topic = str(device_id)  # Topic is the deviceID
+    topic = str(device_id)
 
     # Initialize device entry if not exists
     if device_id not in device_slot_data:
-        device_slot_data[device_id] = []
+        device_slot_data[device_id] = {}
 
-    # Append the new slot data
-    device_slot_data[device_id].append({
+    # Update or create the slot data
+    device_slot_data[device_id][slotIndex] = {
         "slotIndex": slotIndex,
         "spaceStatus": status,
         "licensePlate": licenseplate
-    })
-
-    # Prepare the message
-    data_to_send = {
-        "deviceID": str(device_id),
-        "slots": device_slot_data[device_id]
     }
-    message = json.dumps(data_to_send)
-    print(f"Publishing message: {message}")  # Log the message before sending
+
+    # Prepare message with ALL slots for this device
+    message = {
+        "deviceID": str(device_id),
+        "slots": list(device_slot_data[device_id].values())
+    }
+
+    print(f"Publishing slots for device {device_id}:\n{json.dumps(message, indent=2)}")
 
     try:
-        mainserverbroker.send(topic, message)
-        print(f"Message published successfully to topic: {topic}")
+        mainserverbroker.send(topic, json.dumps(message))
+        print(f"All slots published successfully for device {device_id}")
     except socket.error as e:
         print(f"Failed to connect to MQTT broker: {e}")
     except Exception as e:
