@@ -27,54 +27,89 @@ class Broker:
         self.port = self.NetworkSetting.server_port
         self.client = mqtt.Client()
         
-        self.client.on_connect = self.on_connect
-        self.client.on_disconnect = self.on_disconnect
+        self.client.on_connect = self._on_connect
+        self.client.on_disconnect = self._on_disconnect
+        self.client.on_message = self._on_message
         
         # Start loop in the background to maintain network traffic
         self.client.loop_start()
 
-    def on_connect(self, client, userdata, flags, rc):
+    def _on_connect(self, client, userdata, flags, rc):
         if rc == 0:
-            print("Broker Connected!")
-            # Call this at server startup
-            initialize_and_publish_all_slots()
+            print("MQTT Broker Connected!")
+            # Subscribe to a command topic when connected
+            command_topic = f"{Account.objects.first().device_id}/commands/get_status"
+            client.subscribe(command_topic)
+            print(f"Subscribed to command topic: {command_topic}")
+            
+            # Trigger publishing all statuses on connection (Wi-Fi reconnection)
+            print("Connection restored, publishing all current statuses.")
+            publish_all_current_statuses() 
+            
         else:
             print(f"Connection failed with code {rc}")
 
-    def on_disconnect(self, client, userdata, rc):
+    def _on_disconnect(self, client, userdata, rc):
         print("Disconnected from broker. Trying to reconnect...")
-        self.reconnect()
+        # The loop_start handles reconnection attempts automatically, 
+        # but you might want specific logic here if needed beyond basic retry.
+        # self.reconnect() # Usually loop_start handles this, remove if not needed
+
+    def _on_message(self, client, userdata, msg):
+        """Callback for handling incoming MQTT messages."""
+        print(f"Message received on topic {msg.topic}: {msg.payload.decode()}")
+        
+        # Define the expected command topic (must match the subscription in _on_connect)
+        command_topic = f"{Account.objects.first().device_id}/commands/get_status"
+        
+        if msg.topic == command_topic and msg.payload.decode() == "GET_STATUS": # Example payload to trigger
+            print("Received GET_STATUS command, publishing all current statuses.")
+            publish_all_current_statuses()
+        # Add other command handlers here if needed
+
 
     def connect(self):
         try:
             self.client.connect(self.broker, self.port, keepalive=60)
+            print(f"Attempting to connect to broker {self.broker}:{self.port}")
         except Exception as e:
             print(f"Connection error: {e}")
 
     def reconnect(self):
+        # This method is less critical if using loop_start, which handles auto-reconnect.
+        # If loop_start is not enough, you might keep manual retry logic.
         def retry():
             while True:
                 try:
                     self.client.reconnect()
+                    print("Manual reconnect attempt successful.")
                     break
-                except:
-                    print("Reconnect failed. Retrying in 5 seconds...")
+                except Exception as e:
+                    print(f"Manual reconnect failed: {e}. Retrying in 5 seconds...")
                     time.sleep(5)
-        Thread(target=retry, daemon=True).start()
+        # Only start manual retry if loop_start's auto-reconnect is insufficient
+        # Thread(target=retry, daemon=True).start()
 
     def send(self, topic, message):
+        """Publish a message to a topic."""
         try:
+            print(f"Attempting to publish to topic '{topic}'")
             result = self.client.publish(topic, message)
+            # result.wait_for_publish() # Optional: block until publish completes
             if result.rc == mqtt.MQTT_ERR_SUCCESS:
-                print("Message published successfully.")
+                print("Message queued for publishing successfully.")
             else:
-                print(f"Failed to publish message: {result.rc}")
+                print(f"Failed to queue message for publishing: {result.rc}")
+            return result # Return result object if you need to check status later
         except Exception as e:
             print(f"Publish error: {e}")
+            return None
 
     def disconnect(self):
-        self.client.loop_stop()
+        print("Disconnecting MQTT client...")
+        self.client.loop_stop() # Stop the background loop
         self.client.disconnect()
+        print("MQTT client disconnected.")
 
 mainserverbroker = Broker()
 mainserverbroker.connect()
@@ -93,70 +128,102 @@ def chunk_data(image_data, chunk_size):
 # Dictionary structure: {device_id: {slotIndex: {slot_data}}}
 device_slot_data = {}
 
-def initialize_and_publish_all_slots():
-    """Initialize all devices/slots with default values and publish. called after connection is formed with broker"""
-    devices = Account.objects.all()
+def log_published_message(device_id, message_data):
+    """Log the published message in a human-readable format."""
+    print("\n" + "="*50)
+    print(f"Publishing to device: {device_id}")
+    print("-"*50)
+    # Use json.dumps with indent for pretty printing
+    print(json.dumps(message_data, indent=2))
+    print("="*50 + "\n")
+
+
+# THIS IS THE CUSTOM COMMAND FUNCTION
+def publish_all_current_statuses():
+    """
+    Retrieves the current status of all devices/slots from memory
+    and publishes it to the server for each device.
+    """
+    print("Executing custom command: publish_all_current_statuses")
+    
+    if not device_slot_data:
+        print("No device slot data available in memory.")
+        # Optionally, you could try to initialize here if needed, 
+        # but assuming initialization happens on startup already.
+        # initialize_device_slots_data() 
+        # if not device_slot_data: return
+
+    for device_id, slots in device_slot_data.items():
+        if not slots:
+            print(f"No slots recorded for device {device_id}.")
+            continue # Skip if a device has no slots initialized/updated
+
+        message_data = {
+            "deviceID": str(device_id),
+            "slots": list(slots.values()) # Convert dictionary values to a list
+        }
+
+        # Log the message before sending
+        log_published_message(device_id, message_data)
+
+        # Send the message via MQTT
+        topic = str(device_id) # Use device_id as the topic
+        try:
+            mainserverbroker.send(topic, json.dumps(message_data))
+            print(f"Successfully published all statuses for device {device_id} to topic {topic}.")
+        except Exception as e:
+            print(f"Failed to publish all statuses for device {device_id}: {str(e)}")
+
+
+# Function to initialize device_slot_data with default values
+def initialize_device_slots_data():
+    """Initializes device_slot_data with default 'vacant' statuses."""
+    print("Initializing device slot data...")
+    devices = Account.objects.all() # Get all devices from your database
+    if not devices:
+        print("No devices found in the database for initialization.")
+        return
+
     for device in devices:
         device_id = device.device_id
-        device_slot_data[device_id] = {}
-        
-        # Initialize slots (example: 10 slots per device)
-        for slot_index in range(0, 3):
-            device_slot_data[device_id][slot_index] = {
-                "slotIndex": slot_index,
-                "spaceStatus": "vacant",
-                "licensePlate": ""
-            }
-        
-        # Prepare message
-        message = {
-            "deviceID": str(device_id),
-            "slots": list(device_slot_data[device_id].values())
-        }
-        
-        # Print the message being published
-        print(f"Publishing to device {device_id}:")
-        print(json.dumps(message, indent=2))
-        
-        try:
-            mainserverbroker.send(str(device_id), json.dumps(message))
-            print(f"Successfully published to {device_id}")
-        except Exception as e:
-            print(f"Failed to publish to {device_id}: {str(e)}")
+        # Check if device already has some data (e.g., from a previous run state)
+        if device_id not in device_slot_data:
+             device_slot_data[device_id] = {}
+
+        # Example: Initialize 10 slots per device if they don't exist
+        # This prevents overwriting potentially saved state if you implement that later
+        for slot_index in range(0, 3): 
+            if slot_index not in device_slot_data[device_id]:
+                 device_slot_data[device_id][slot_index] = {
+                    "slotIndex": slot_index,
+                    "spaceStatus": "vacant", # Default status
+                    "licensePlate": "" # Default empty
+                }
+    print("Device slot data initialization complete.")
 
 
-
+# Modify update_server to just update the in-memory state
+# Publishing ALL statuses for the device will be handled by publish_all_current_statuses
+# which is triggered after any change via a mechanism you'd add (e.g., a short delay/debounce).
+# For now, we'll call publish_all_current_statuses directly after update for demonstration.
 def update_server(slotIndex, status, licenseplate):
-    device_id = Account.objects.first().device_id
-    topic = str(device_id)
-
-    # Initialize device entry if not exists
+    device_id = Account.objects.first().device_id # Assuming device ID is needed here
+    
+    # Ensure device entry exists
     if device_id not in device_slot_data:
-        device_slot_data[device_id] = {}
+         device_slot_data[device_id] = {}
 
-    # Update or create the slot data
+    # Update the specific slot's data in the in-memory dictionary
     device_slot_data[device_id][slotIndex] = {
         "slotIndex": slotIndex,
         "spaceStatus": status,
         "licensePlate": licenseplate
     }
+    
+    print(f"Updated in-memory state for device {device_id}, slot {slotIndex}: status={status}, licensePlate='{licenseplate}'")
 
-    # Prepare message with ALL slots for this device
-    message = {
-        "deviceID": str(device_id),
-        "slots": list(device_slot_data[device_id].values())
-    }
-
-    print(f"Publishing slots for device {device_id}:\n{json.dumps(message, indent=2)}")
-
-    try:
-        mainserverbroker.send(topic, json.dumps(message))
-        print(f"All slots published successfully for device {device_id}")
-    except socket.error as e:
-        print(f"Failed to connect to MQTT broker: {e}")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-
+    # Now, publish the *entire* state for this device as requested
+    publish_all_current_statuses() 
 
 
 # helps in changing the hostname of the device
@@ -287,22 +354,62 @@ def scan_wifi():
 # CONNEC TO THE WIFI
 def connect_to_wifi(ssid, password):
     """Connects to a WiFi network and enables autoconnect after scanning."""
-    available_ssids = scan_wifi()
+    print(f"Attempting to connect to WiFi: {ssid}")
+    # Note: scan_wifi is called inside this function, adding delay.
+    # Consider if you need to rescan every time or use cached results.
+    available_ssids = scan_wifi() 
     if not available_ssids:
         print("No WiFi networks found or scanning failed.")
-        return 401
+        return 401 # Return a relevant status code
+        
     if ssid not in available_ssids:
         print(f"Error: Network '{ssid}' not found in scan results.")
-        return 401
+        return 401 # Return a relevant status code
+
     try:
+        # Note: This creates a new connection profile with the ssid name.
+        # If you always want to use "preconfigured", you'd modify that instead.
         connect_cmd = f'sudo nmcli dev wifi connect "{ssid}" password "{password}"'
+        # Using shell=True with user input can be dangerous. Sanitize inputs or avoid shell=True.
         result = subprocess.run(connect_cmd, shell=True, check=True, text=True, capture_output=True)
         print(f"Ready to Connect with WiFi: {ssid}")
+        print(f"nmcli connect output:\n{result.stdout}")
+        if result.stderr:
+             print(f"nmcli connect stderr:\n{result.stderr}")
+        
+        # Assuming "preconfigured" is the connection profile you want to autoconnect on boot
         modify_cmd = f'sudo nmcli connection modify "preconfigured" connection.autoconnect yes'
+        # Using shell=True here again, consider security.
         subprocess.run(modify_cmd, shell=True, check=True, text=True)
-        print(f"Autoconnect enabled for {ssid}")
+        print(f"Autoconnect enabled for preconfigured connection.")
+        
+        # Need to check actual connection status here, subprocess success might not mean connected.
+        # You could check `nmcli device status` or try to ping the gateway/broker.
+        print(f"Successfully initiated connection process to {ssid}.")
+        return 200 # Indicate success attempt, actual connection might take time/fail later
      
     except subprocess.CalledProcessError as e:
         print(f"Error connecting to WiFi: {e}")
+        print(f"Output: {e.output}")
+        print(f"Error: {e.stderr}")
+        return 500 # Indicate failure
+    except Exception as e:
+        print(f"An unexpected error occurred during connect_to_wifi: {e}")
+        return 500 # Indicate failure
+
+
+# --- Startup Logic ---
+# 1. Initialize data structure (with default 'vacant' if needed)
+initialize_device_slots_data()
+
+# 2. Publish initial status (This is the boot-up trigger for the custom command)
+print("Server starting up. Publishing initial device statuses.")
+publish_all_current_statuses()
+
+# 3. mainserverbroker instance is already created and connect() called above.
+# The _on_connect callback will handle publishing on Wi-Fi reconnection and subscribing
+# to the command topic.
+
+# --- End Startup Logic ---
 
 
