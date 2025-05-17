@@ -88,23 +88,35 @@ def chunk_data(image_data, chunk_size):
 
 
 
+# Dictionary to store slot data for each device
+device_slot_data = {}
+
 def update_server(slotIndex, status, licenseplate):
     device_id = Account.objects.first().device_id
-    data_to_send = {
-        "deviceID": str(device_id) + ":" + str(slotIndex),
+    topic = str(device_id)  # Topic is the deviceID
+
+    # Initialize device entry if not exists
+    if device_id not in device_slot_data:
+        device_slot_data[device_id] = []
+
+    # Append the new slot data
+    device_slot_data[device_id].append({
+        "slotIndex": slotIndex,
         "spaceStatus": status,
         "licensePlate": licenseplate
+    })
+
+    # Prepare the message
+    data_to_send = {
+        "deviceID": str(device_id),
+        "slots": device_slot_data[device_id]
     }
-    print(device_id)
-    print(slotIndex)
-    print(data_to_send)
-    topic = str(device_id) + ":" + str(slotIndex)
     message = json.dumps(data_to_send)
+    print(f"Publishing message: {message}")  # Log the message before sending
 
     try:
-        
-        mainserverbroker.send(topic,message)
-        # client.disconnect()
+        mainserverbroker.send(topic, message)
+        print(f"Message published successfully to topic: {topic}")
     except socket.error as e:
         print(f"Failed to connect to MQTT broker: {e}")
     except Exception as e:
