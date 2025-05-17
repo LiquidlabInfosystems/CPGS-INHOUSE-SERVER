@@ -35,9 +35,9 @@ class Broker:
 
     def on_connect(self, client, userdata, flags, rc):
         if rc == 0:
+            print("Broker Connected!")
             # Call this at server startup
             initialize_and_publish_all_slots()
-            print("Broker Connected!")
         else:
             print(f"Connection failed with code {rc}")
 
@@ -94,7 +94,7 @@ def chunk_data(image_data, chunk_size):
 device_slot_data = {}
 
 def initialize_and_publish_all_slots():
-    """Initialize all devices/slots with default values and publish."""
+    """Initialize all devices/slots with default values and publish. called after connection is formed with broker"""
     devices = Account.objects.all()
     for device in devices:
         device_id = device.device_id
