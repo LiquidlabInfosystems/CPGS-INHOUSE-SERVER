@@ -121,10 +121,6 @@ def chunk_data(image_data, chunk_size):
         chunks.append(image_data[i:i+chunk_size])
     return chunks
 
-
-
-
-
 # Dictionary structure: {device_id: {slotIndex: {slot_data}}}
 device_slot_data = {}
 
