@@ -43,7 +43,7 @@ class Broker:
             print(f"Subscribed to command topic: {command_topic}")
             
             # Trigger publishing all statuses on connection (Wi-Fi reconnection)
-            print("Connection restored, publishing all current statuses.")
+            print("Publishing all current statuses.")
             publish_all_current_statuses() 
             
         else:
@@ -148,10 +148,6 @@ def publish_all_current_statuses():
     
     if not device_slot_data:
         print("No device slot data available in memory.")
-        # Optionally, you could try to initialize here if needed, 
-        # but assuming initialization happens on startup already.
-        # initialize_device_slots_data() 
-        # if not device_slot_data: return
 
     for device_id, slots in device_slot_data.items():
         if not slots:
@@ -201,11 +197,6 @@ def initialize_device_slots_data():
                 }
     print("Device slot data initialization complete.")
 
-
-# Modify update_server to just update the in-memory state
-# Publishing ALL statuses for the device will be handled by publish_all_current_statuses
-# which is triggered after any change via a mechanism you'd add (e.g., a short delay/debounce).
-# For now, we'll call publish_all_current_statuses directly after update for demonstration.
 def update_server(slotIndex, status, licenseplate):
     device_id = Account.objects.first().device_id # Assuming device ID is needed here
     
