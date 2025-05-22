@@ -134,7 +134,7 @@ def log_published_message(device_id, message_data):
     print("="*50 + "\n")
 
 
-# THIS IS THE CUSTOM COMMAND FUNCTION
+# THIS IS THE CUSTOM COMMAND FUNCTION (INVOKED BY "GET_STATUS")
 def publish_all_current_statuses():
     """
     Retrieves the current status of all devices/slots from memory
@@ -182,8 +182,7 @@ def initialize_device_slots_data():
         if device_id not in device_slot_data:
              device_slot_data[device_id] = {}
 
-        # Example: Initialize 10 slots per device if they don't exist
-        # This prevents overwriting potentially saved state if you implement that later
+        # Example: Initialize 3 slots per device if they don't exist
         for slot_index in range(0, 3): 
             if slot_index not in device_slot_data[device_id]:
                  device_slot_data[device_id][slot_index] = {
