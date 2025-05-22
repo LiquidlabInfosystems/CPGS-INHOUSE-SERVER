@@ -37,14 +37,15 @@ class Broker:
     def _on_connect(self, client, userdata, flags, rc):
         if rc == 0:
             print("MQTT Broker Connected!")
-            # Subscribe to a command topic when connected
-            command_topic = f"{Account.objects.first().device_id}/commands/get_status"
+            # Subscribe to commands topic with wildcard to receive all commands
+            device_id = Account.objects.first().device_id
+            command_topic = f"{device_id}/commands/#"
             client.subscribe(command_topic)
             print(f"Subscribed to command topic: {command_topic}")
             
             # Trigger publishing all statuses on connection (Wi-Fi reconnection)
-            print("Publishing all current statuses.")
-            publish_all_current_statuses() 
+            # print("Publishing all current statuses.")
+            # publish_all_current_statuses() 
             
         else:
             print(f"Connection failed with code {rc}")
@@ -57,16 +58,43 @@ class Broker:
 
     def _on_message(self, client, userdata, msg):
         """Callback for handling incoming MQTT messages."""
-        print(f"Message received on topic {msg.topic}: {msg.payload.decode()}")
-        
-        # Define the expected command topic (must match the subscription in _on_connect)
-        command_topic = f"{Account.objects.first().device_id}/commands/get_status"
-        
-        if msg.topic == command_topic and msg.payload.decode() == "GET_STATUS": # Example payload to trigger
-            print("Received GET_STATUS command, publishing all current statuses.")
-            publish_all_current_statuses()
-        # Add other command handlers here if needed
+        try:
+            # Decode and parse the message
+            payload = msg.payload.decode()
+            print(f"Message received on topic {msg.topic}: {payload}")
+            
+            # Try to parse as JSON
+            try:
+                command_data = json.loads(payload)
+                if "action" in command_data:
+                    command = command_data["action"]
+                    
+                    # Handle commands starting with $
+                    if command.startswith('$'):
+                        self._handle_dollar_command(command)
+                    else:
+                        print(f"Invalid command.")
+            except json.JSONDecodeError:
+                print(f"Invalid JSON format in message: {payload}")
+                
+        except Exception as e:
+            print(f"Error processing message: {e}")
 
+    def _handle_dollar_command(self, command):
+        """Handle commands that start with $"""
+        try:
+            # Remove the $ prefix
+            cmd = command[1:].lower()
+            
+            # Handle different commands
+            if cmd == 'gs':  # get status command
+                print("Executing get status command")
+                publish_all_current_statuses()
+            else:
+                print(f"Unknown command: ${cmd}")
+                
+        except Exception as e:
+            print(f"Error handling dollar command: {e}")
 
     def connect(self):
         try:
