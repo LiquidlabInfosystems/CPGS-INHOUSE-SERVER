@@ -43,7 +43,7 @@ def set_pilot_to_red():
 
 # Function to set the pilot to red
 def set_pilot_to_off():
-    """Turn on the red light and turn off the green light."""
+    """Turn off the red light and turn off the green light."""
     # print('pilot changing')
     if GREENLIGHT and REDLIGHT:
         GREENLIGHT.off()

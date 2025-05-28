@@ -73,7 +73,7 @@ class Broker:
                     if command.startswith('$'):
                         self._handle_dollar_command(command)
                     else:
-                        print(f"Invalid command.")
+                        print(f"Invalid command")
             except json.JSONDecodeError:
                 print(f"Invalid JSON format in message: {payload}")
                 
