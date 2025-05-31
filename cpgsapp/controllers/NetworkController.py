@@ -11,7 +11,7 @@ import socket
 import subprocess
 from threading import Thread
 import time
-from cpgsapp.controllers.FileSystemContoller import get_space_info
+from cpgsapp.controllers.FileSystemContoller import get_space_info, get_space_coordinates
 from cpgsapp.models import Account, NetworkSettings, SpaceInfo
 from cpgsapp.serializers import NetworkSettingsSerializer
 from storage import Variables
@@ -211,7 +211,8 @@ def initialize_device_slots_data():
              device_slot_data[device_id] = {}
 
         # Example: Initialize 3 slots per device if they don't exist
-        for slot_index in range(0, 3): 
+        coordinates_list = get_space_coordinates()
+        for slot_index in range(len(coordinates_list)):
             if slot_index not in device_slot_data[device_id]:
                  device_slot_data[device_id][slot_index] = {
                     "slotIndex": slot_index,
