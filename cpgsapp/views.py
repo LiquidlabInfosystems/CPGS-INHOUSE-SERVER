@@ -20,12 +20,17 @@ from rest_framework.views import APIView
 from rest_framework.status import HTTP_200_OK, HTTP_406_NOT_ACCEPTABLE, HTTP_401_UNAUTHORIZED, HTTP_404_NOT_FOUND
 from cpgsapp.controllers.CameraViewController import (
     capture, get_camera_view_with_space_coordinates, 
-    get_monitoring_spaces, liveMode
+    get_monitoring_spaces, liveMode,
+    capture_and_save_background_mask,
+    capture_and_save_background_mask_for_all_device_ids
 )
 from cpgsapp.controllers.FileSystemContoller import (
     change_mode_to_config, change_mode_to_live, clear_space_coordinates, 
     get_mode_info, get_space_coordinates, save_space_coordinates
 )
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+import json
 
 
 
@@ -233,3 +238,28 @@ class CalibrateHandler(APIView):
             return Response({"status":"Missing Authorization Token in body"},status=HTTP_401_UNAUTHORIZED)
     def get(self, req):
         return Response(status=HTTP_200_OK)
+@csrf_exempt
+def get_all_device_ids(request):
+    device_ids = list(Account.objects.values_list('device_id', flat=True))
+    return JsonResponse({'device_ids': device_ids})
+
+@csrf_exempt
+def capture_single_device_id_view(request):
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            device_id = data.get('device_id')
+        except Exception:
+            device_id = None
+        if not device_id:
+            return JsonResponse({'error': 'Missing device_id'}, status=400)
+        result = capture_and_save_background_mask(device_id)
+        return JsonResponse({'success': result})
+    return JsonResponse({'error': 'Invalid method'}, status=405)
+
+@csrf_exempt
+def capture_all_device_ids_view(request):
+    if request.method == 'POST':
+        result = capture_and_save_background_mask_for_all_device_ids()
+        return JsonResponse({'success': result})
+    return JsonResponse({'error': 'Invalid method'}, status=405)

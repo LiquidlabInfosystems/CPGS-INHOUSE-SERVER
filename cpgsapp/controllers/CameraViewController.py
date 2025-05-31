@@ -8,7 +8,7 @@
 import base64
 import json
 import time
-from cpgsapp.models import SpaceInfo
+from cpgsapp.models import SpaceInfo, Account
 from cpgsapp.utils import FixedFIFO
 import cv2
 import numpy as np
@@ -17,6 +17,7 @@ from cpgsapp.controllers.HardwareController import  update_pilot
 from cpgsapp.controllers.NetworkController import update_server
 from cpgsserver.settings import CONFIDENCE_LEVEL, CONSISTENCY_LEVEL, IS_PI_CAMERA_SOURCE
 from storage import Variables
+import os
 # from paddleocr import PaddleOCR
 
 # Initialize PaddleOCR once at module level
@@ -304,3 +305,38 @@ def get_monitoring_spaces():
         
     return response
 
+
+def capture_and_save_background_mask(device_id):
+    """
+    Captures a single frame from the camera and saves cropped images for each slot
+    using the coordinates from get_space_coordinates().
+    Each image is saved as {deviceId}_{slotIndex}.jpg in storage/background/{deviceId}_{slotIndex}/.
+    only for one device id at a time. can be called multiple times for different device ids.
+    """
+    frame = capture()
+    if frame is None:
+        print("Failed to capture frame.")
+        return False
+
+    coordinates_list = get_space_coordinates()
+    for slot_index, slot_coords in enumerate(coordinates_list):
+        pts = np.array(slot_coords, np.int32)
+        x, y, w, h = cv2.boundingRect(pts)
+        cropped_frame = frame[y:y+h, x:x+w]
+        folder = os.path.join('storage', 'background', f'{device_id}_{slot_index}')
+        os.makedirs(folder, exist_ok=True)
+        filename = f"{device_id}_{slot_index}.jpg"
+        file_path = os.path.join(folder, filename)
+        cv2.imwrite(file_path, cropped_frame)
+        print(f"Saved background image to {file_path}")
+    return True
+
+def capture_and_save_background_mask_for_all_device_ids():
+    """
+    Fetches all device IDs from the Account model and calls capture_and_save_all_backgrounds for each.
+    """
+    device_ids = list(Account.objects.values_list('device_id', flat=True))
+    for device_id in device_ids:
+        print(f"Capturing backgrounds for device: {device_id}")
+        capture_and_save_background_mask(device_id)
+    return True
