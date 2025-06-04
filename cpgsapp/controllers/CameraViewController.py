@@ -18,6 +18,7 @@ from cpgsapp.controllers.NetworkController import update_server
 from cpgsserver.settings import CONFIDENCE_LEVEL, CONSISTENCY_LEVEL, IS_PI_CAMERA_SOURCE
 from storage import Variables
 import os
+import glob
 # from paddleocr import PaddleOCR
 
 # Initialize PaddleOCR once at module level
@@ -340,3 +341,86 @@ def capture_and_save_background_mask_for_all_device_ids():
         print(f"Capturing backgrounds for device: {device_id}")
         capture_and_save_background_mask(device_id)
     return True
+
+def load_background_images_for_all_devices():
+    """
+    Loads all background images for each device and slot index from storage/background/.
+    Returns a dictionary: { device_id: { slot_index: image (numpy array) } }
+    """
+    # Get the absolute path to the project root (where this script is located)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
+    background_dir = os.path.join(project_root, 'storage', 'background')
+    device_backgrounds = {}
+    if not os.path.exists(background_dir):
+        return device_backgrounds
+
+    # Find all images matching the pattern deviceId_slotIndex.jpg
+    image_paths = glob.glob(os.path.join(background_dir, '*', '*.jpg'))
+    for img_path in image_paths:
+        # Extract device_id and slot_index from the path
+        filename = os.path.basename(img_path)
+        folder = os.path.basename(os.path.dirname(img_path))
+        try:
+            # folder is like deviceId_slotIndex
+            device_id, slot_index = folder.split('_')
+            slot_index = int(slot_index)
+        except Exception as e:
+            print(f"Skipping {img_path}: {e}")
+            continue
+        # Read the image
+        img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            print(f"Failed to load image: {img_path}")
+            continue
+        if device_id not in device_backgrounds:
+            device_backgrounds[device_id] = {}
+        device_backgrounds[device_id][slot_index] = img
+    return device_backgrounds
+
+
+# Object detection functions :
+
+def preprocess_frame(frame):
+    """Preprocess frame to reduce noise and lighting effects."""
+    # If frame is already grayscale, don't convert
+    if len(frame.shape) == 2 or (len(frame.shape) == 3 and frame.shape[2] == 1):
+        gray = frame
+    else:
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (5, 5), 0)  # Reduce noise
+    gray = cv2.equalizeHist(gray)  # Normalize lighting
+    return gray
+
+def calculate_frame_difference_stats(background, current):
+    """
+    Calculate statistical differences between background and current frame.
+    Returns dictionary containing various difference metrics.
+    """
+    diff = cv2.absdiff(background, current)
+    _, thresh = cv2.threshold(diff, 30, 255, cv2.THRESH_BINARY)
+    
+    stats = {
+        'mean_diff': np.mean(diff),
+        'std_diff': np.std(diff),
+        'max_diff': np.max(diff),
+        'changed_pixels': np.sum(thresh == 255),
+        'change_percentage': (np.sum(thresh == 255) / thresh.size * 100)
+    }
+    return stats
+
+def is_object_present(thresh, contour_area_threshold=300, pixel_change_threshold=10):
+    """Determine if an object is present based on pixel change and contour analysis."""
+    # Rule 1: Significant pixel change
+    change_percent = (np.sum(thresh == 255) / thresh.size) * 100
+    enough_pixel_change = change_percent > pixel_change_threshold
+    
+    # Rule 2: Physical contours
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    large_contours = [cnt for cnt in contours if cv2.contourArea(cnt) > contour_area_threshold]
+    has_contours = len(large_contours) > 0
+    
+    return enough_pixel_change and has_contours
+
+
+# End of Object detection functions :
