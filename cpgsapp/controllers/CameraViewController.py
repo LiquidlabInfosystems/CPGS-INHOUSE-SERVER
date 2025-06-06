@@ -8,7 +8,7 @@
 import base64
 import json
 import time
-from cpgsapp.models import SpaceInfo, Account
+from cpgsapp.models import SpaceInfo, Account, DeviceBackground
 from cpgsapp.utils import FixedFIFO
 import cv2
 import numpy as np
@@ -309,10 +309,7 @@ def get_monitoring_spaces():
 
 def capture_and_save_background_mask(device_id):
     """
-    Captures a single frame from the camera and saves cropped images for each slot
-    using the coordinates from get_space_coordinates().
-    Each image is saved as {deviceId}_{slotIndex}.jpg in storage/background/{deviceId}_{slotIndex}/.
-    only for one device id at a time. can be called multiple times for different device ids.
+    Captures background images and saves them to database 
     """
     frame = capture()
     if frame is None:
@@ -324,12 +321,18 @@ def capture_and_save_background_mask(device_id):
         pts = np.array(slot_coords, np.int32)
         x, y, w, h = cv2.boundingRect(pts)
         cropped_frame = frame[y:y+h, x:x+w]
-        folder = os.path.join('storage', 'background', f'{device_id}_{slot_index}')
-        os.makedirs(folder, exist_ok=True)
-        filename = f"{device_id}_{slot_index}.jpg"
-        file_path = os.path.join(folder, filename)
-        cv2.imwrite(file_path, cropped_frame)
-        print(f"Saved background image to {file_path}")
+        
+        # Convert to JPEG bytes
+        _, buffer = cv2.imencode('.jpg', cropped_frame)
+        jpg_bytes = buffer.tobytes()
+        
+        # Save to database
+        DeviceBackground.objects.update_or_create(
+            device_id=device_id,
+            slot_index=slot_index,
+            defaults={'background_image': jpg_bytes}
+        )
+        print(f"Saved background for device {device_id} slot {slot_index}")
     return True
 
 def capture_and_save_background_mask_for_all_device_ids():
