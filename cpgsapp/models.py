@@ -5,6 +5,7 @@
 # Description: Database models fields or schema
 
 from django.db import models
+import uuid
 
 class NetworkSettings(models.Model):
     ipv4_address = models.GenericIPAddressField(default='192.168.0.254')
@@ -48,3 +49,14 @@ class SpaceInfo(models.Model):
     def __str__(self):
         return f"Network Settings ({self.username})"
 
+
+
+class DeviceBackground(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    device_id = models.CharField(max_length=100)
+    slot_index = models.IntegerField()
+    background_image = models.BinaryField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        unique_together = ('device_id', 'slot_index')
