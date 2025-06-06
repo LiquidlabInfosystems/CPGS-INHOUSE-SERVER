@@ -75,7 +75,7 @@ def save_space_coordinates(x, y):
     if len(Variables.points)%5 == 0:
         Variables.coordinates.append(Variables.points)
         with open('storage/coordinates.txt','w') as coordinate:
-            SpaceInfo.objects.create(space_id = len(Variables.coordinates)-1, space_status = 'vaccant')
+            SpaceInfo.objects.create(space_id = len(Variables.coordinates)-1, space_status = 'vacant')
             json.dump(Variables.coordinates, coordinate, indent=4)
         Variables.points = []
 

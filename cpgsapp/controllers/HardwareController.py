@@ -65,7 +65,7 @@ def update_pilot(mode):
         # available_spaces = Variables.TOTALSPACES - occupied_count
         if mode == 'occupied':
             set_pilot_to_red()
-        elif mode == 'vaccant':
+        elif mode == 'vacant':
             set_pilot_to_green()
         else:
             set_pilot_to_off()
