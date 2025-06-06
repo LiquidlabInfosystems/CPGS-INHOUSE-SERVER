@@ -283,9 +283,9 @@ def liveMode():
         elif object_detected and not isLicensePlate:
              current_space_status = 'obstacle detected'
              current_license_plate_payload = ''
-        elif not object_detected and isLicensePlate:
-             current_space_status = 'occupied'
-             current_license_plate_payload = licensePlateBase64
+        # elif not object_detected and isLicensePlate:
+        #      current_space_status = 'occupied'
+        #      current_license_plate_payload = licensePlateBase64
 
         # Update confidence queue (using occupied status for pilot logic)
         Variables.CONFIDENCE_QUEUE[slotIndex].enqueue(current_space_status == 'occupied')
@@ -299,7 +299,7 @@ def liveMode():
         processed_slots_data.append({"slotIndex": slotIndex, "spaceStatus": current_space_status})
 
         # --- Only call update_server and save to DB if state has changed ---
-        if current_space_status != prev_space_status or current_license_plate_payload != prev_license_plate:
+        if current_space_status != prev_space_status :
              print(f'Live Mode State change detected for slot {slotIndex}: Status {prev_space_status} -> {current_space_status}, LP change: {prev_license_plate != current_license_plate_payload}. Calling update_server...')
              update_server(slotIndex, current_space_status, current_license_plate_payload)
 
@@ -318,11 +318,20 @@ def liveMode():
     # --- Pilot Update after processing all slots ---
     if IS_PI_CAMERA_SOURCE:
         try:
-            any_occupied = any(s['spaceStatus'] == 'occupied' for s in processed_slots_data)
-            if any_occupied:
-                 update_pilot('occupied')
+            spaces = SpaceInfo.objects.all()
+            Variables.pilotStatusofEachSpace = []
+            for space in spaces:
+                # Consider a space 'occupied' for pilot light if status is 'occupied' or 'obstacle detected'
+                if space.space_status == "occupied" or space.space_status == "obstacle detected":
+                    Variables.pilotStatusofEachSpace.append(True)
+                else:
+                    Variables.pilotStatusofEachSpace.append(False)
+
+            # print(Variables.pilotStatusofEachSpace) # Uncomment if you want to see the list
+            if(all(Variables.pilotStatusofEachSpace)):
+                update_pilot('occupied')
             else:
-                 update_pilot('vacant')
+                update_pilot('vacant') # Corrected typo
         except Exception as e:
             print(f"Error during pilot update after liveMode loop: {e}")
 
@@ -514,10 +523,10 @@ def get_monitoring_spaces():
              # If obstacle detected but no license plate, it's an obstacle
              current_space_status = 'obstacle detected'
              current_license_plate_payload = '' # No license plate for obstacles
-        elif not object_detected and isLicensePlate:
-             # If no obstacle detected but license plate found, treat as occupied
-             current_space_status = 'occupied'
-             current_license_plate_payload = licensePlateBase64 # Include detected LP
+        # elif not object_detected and isLicensePlate:
+        #      # If no obstacle detected but license plate found, treat as occupied
+        #      current_space_status = 'occupied'
+        #      current_license_plate_payload = licensePlateBase64 # Include detected LP
         # else (not object_detected and not isLicensePlate): status remains 'vacant'
 
         # Update confidence queue based on whether it's considered occupied for pilot light logic
@@ -557,7 +566,7 @@ def get_monitoring_spaces():
         # --- Only call update_server and save to DB if status or license plate has changed ---
         # This prevents continuous sending when status and LP are stable
         # Check if either status or the *payload* license plate has changed
-        if current_space_status != prev_space_status or current_license_plate_payload != prev_license_plate:
+        if current_space_status != prev_space_status :
              print(f'Status or License Plate change detected for slot {slotIndex}: Status {prev_space_status} -> {current_space_status}, LP change: {prev_license_plate != current_license_plate_payload}. Calling update_server...')
 
              # Update the in-memory state and send via MQTT using the existing function
@@ -585,21 +594,32 @@ def get_monitoring_spaces():
     # This is a more efficient location for the pilot update logic if needed.
     if IS_PI_CAMERA_SOURCE:
         try:
-            # Pilot logic: Pilot is occupied if ANY slot is 'occupied'. It's vacant only if ALL are 'vacant'.
-            # Using the 'processed_slots_data' list for the most recent computed statuses.
-            any_occupied = any(s['spaceStatus'] == 'occupied' for s in processed_slots_data)
+            spaces = SpaceInfo.objects.all()
+            Variables.pilotStatusofEachSpace = []
+            for space in spaces:
+                # Consider a space 'occupied' for pilot light if status is 'occupied' or 'obstacle detected'
+                if space.space_status == "occupied" or space.space_status == "obstacle detected":
+                    Variables.pilotStatusofEachSpace.append(True)
+                else:
+                    Variables.pilotStatusofEachSpace.append(False)
 
-            if any_occupied:
-                 update_pilot('occupied') # Pilot is 'occupied' if any space is occupied
+            # print(Variables.pilotStatusofEachSpace) # Uncomment if you want to see the list
+            if(all(Variables.pilotStatusofEachSpace)):
+                update_pilot('occupied')
             else:
-                 update_pilot('vacant') # Pilot is 'vacant' only if all spaces are vacant
+                update_pilot('vacant') # Corrected typo
         except Exception as e:
-            print(f"Error during pilot update after loop: {e}")
-    # --- End Pilot Update ---
+            print(f"Error during pilot update after liveMode loop: {e}")
+#---------------------------------------------- End Pilot Update ---
 
     # Return the list of processed slot data
     # The MQTT sending is handled by update_server within the loop, only on change.
     return processed_slots_data
+
+
+
+
+
 
 
 def capture_and_save_background_mask(device_id):
@@ -671,6 +691,9 @@ def load_background_images_for_all_devices():
             continue
     
     return device_backgrounds
+
+
+
 
 
 # Object detection functions :
