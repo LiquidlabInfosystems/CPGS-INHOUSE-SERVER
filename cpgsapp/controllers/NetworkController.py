@@ -16,7 +16,7 @@ from cpgsapp.models import Account, NetworkSettings, SpaceInfo
 from cpgsapp.serializers import NetworkSettingsSerializer
 from storage import Variables
 import paho.mqtt.client as mqtt
-
+from cpgsapp.controllers.Device_id_config import get_device_id
 
 
 
@@ -38,7 +38,7 @@ class Broker:
         if rc == 0:
             print("MQTT Broker Connected!")
             # Subscribe to commands topic with wildcard to receive all commands
-            device_id = Account.objects.first().device_id
+            device_id = get_device_id()
             command_topic = f"{device_id}/commands/#"
             client.subscribe(command_topic)
             print(f"Subscribed to command topic: {command_topic}")
@@ -222,7 +222,7 @@ def initialize_device_slots_data():
     print("Device slot data initialization complete.")
 
 def update_server(slotIndex, status, licenseplate):
-    device_id = Account.objects.first().device_id # Assuming device ID is needed here
+    device_id = get_device_id() # Assuming device ID is needed here
     
     # Ensure device entry exists
     if device_id not in device_slot_data:

@@ -19,6 +19,7 @@ from cpgsserver.settings import CONFIDENCE_LEVEL, CONSISTENCY_LEVEL, IS_PI_CAMER
 from storage import Variables
 import os
 import glob
+from cpgsapp.controllers.Device_id_config import get_device_id
 # from paddleocr import PaddleOCR
 
 # Initialize PaddleOCR once at module level
@@ -176,58 +177,156 @@ def getSpaceMonitorWithLicensePlateDectection(x, y, w, h ):
 # Function to start live mode and detect the available license plates
 def liveMode():
     '''
-    SCAN the parking slot FOR VEHICLE
-    '''      
+    SCAN the parking slot FOR VEHICLE and use object detection for each slot.
+    '''
+    # Load backgrounds once per call
+    backgrounds = load_background_images_for_all_devices()
     poslist = get_space_coordinates()
-    Variables.SPACES = []
     Variables.TOTALSPACES = len(poslist)
+
+    # Capture the current frame ONCE before processing all slots
+    current_frame = load_camera_view()
+
+    # Check if frame capture failed or returned an empty frame
+    if current_frame is None or current_frame.size == 0:
+         print("Failed to capture a valid frame for live mode monitoring.")
+         return # Return without processing if no frame captured
+
+    # Ensure confidence queues are initialized for all potential slots
     for slotIndex in range(Variables.TOTALSPACES):
-        if len(Variables.CONFIDENCE_QUEUE) != Variables.TOTALSPACES:
-            Variables.CONFIDENCE_QUEUE.append(FixedFIFO(CONSISTENCY_LEVEL))
-            
-    pilotStatusofEachSpace = []
+        if len(Variables.CONFIDENCE_QUEUE) <= slotIndex:
+             Variables.CONFIDENCE_QUEUE.append(FixedFIFO(CONSISTENCY_LEVEL))
+
+    # Access device_slot_data from NetworkController for status comparison and update
+
+
+    device_id = get_device_id()
+
+    # List to collect processed slot data for pilot light logic
+    processed_slots_data = []
+
+    # Ensure device_id exists in device_slot_data before accessing
+    if device_id not in device_slot_data:
+         device_slot_data[device_id] = {}
+
     for slotIndex, pos in enumerate(poslist):
+        # --- Frame Cropping and Initial Processing ---
         SpaceCoordinates = np.array([[pos[0][0], pos[0][1]], [pos[1][0], pos[1][1]], [pos[2][0], pos[2][1]], [pos[3][0], pos[3][1]]])
         pts = np.array(SpaceCoordinates, np.int32)
         x, y, w, h = cv2.boundingRect(pts)
-        isLicensePlate,licensePlateBase64, licensePlateinSpaceInBase64 = getSpaceMonitorWithLicensePlateDectection( x, y, w, h)
-        Variables.CONFIDENCE_QUEUE[slotIndex].enqueue(isLicensePlate)
-        queue = Variables.CONFIDENCE_QUEUE[slotIndex].get_queue()
-        Occupied_count = queue.count(True)
-        Vaccency_count = queue.count(False)
-        Occupied_confidence = int((Occupied_count/CONSISTENCY_LEVEL)*100)
-        Vaccency_confidence = int((Vaccency_count/CONSISTENCY_LEVEL)*100)
-        # print(Occupied_confidence, Vaccency_confidence,slotIndex )
-        space = SpaceInfo.objects.get(space_id = slotIndex)
-        if Occupied_confidence == CONFIDENCE_LEVEL:
-            if space.space_status == 'vacant':
-                print('occupied')
-                space.space_status = 'occupied'
-                update_server(slotIndex, 'occupied',licensePlateBase64)
-                pilotStatusofEachSpace.append(True)
-        elif Vaccency_confidence == CONFIDENCE_LEVEL:
-            if space.space_status == 'occupied':
-                print('vacant')
-                space.space_status = 'vacant'
-                update_server(slotIndex, 'vacant', licensePlateBase64)
-                pilotStatusofEachSpace.append(False)
-        space.save()
-        
 
-    if IS_PI_CAMERA_SOURCE:
-        spaces = SpaceInfo.objects.all()
-        Variables.pilotStatusofEachSpace = []
-        for space in spaces:
-            if space.space_status == "occupied":
-                Variables.pilotStatusofEachSpace.append(True)
-            else:
-                Variables.pilotStatusofEachSpace.append(False)
-        
-        # print(Variables.pilotStatusofEachSpace)
-        if(all(Variables.pilotStatusofEachSpace)):
-            update_pilot('occupied')
+        # Ensure bounding box coordinates are valid and within frame dimensions
+        frame_height, frame_width = current_frame.shape[:2]
+        x = max(0, x)
+        y = max(0, y)
+        w = min(w, frame_width - x)
+        h = min(h, frame_height - y)
+
+        if w <= 0 or h <= 0:
+             print(f"Skipping slot {slotIndex} due to invalid or zero-sized bounding box: x={x}, y={y}, w={w}, h={h}")
+             processed_slots_data.append({"slotIndex": slotIndex, "spaceStatus": 'vacant'})
+             continue
+
+        slot_frame_crop = current_frame[y:y+h, x:x+w]
+
+        if len(slot_frame_crop.shape) == 3:
+             slot_frame_gray = cv2.cvtColor(slot_frame_crop, cv2.COLOR_BGR2GRAY)
         else:
-            update_pilot('vacant')
+             slot_frame_gray = slot_frame_crop
+
+        # --- License Plate Detection ---
+        slot_frame_gray_for_lp = slot_frame_gray.copy()
+        slot_with_lp_drawing, licensePlate, isLicensePlate = dectect_license_plate(slot_frame_gray_for_lp)
+
+        licensePlateBase64 = ""
+        if isLicensePlate and licensePlate is not None and licensePlate.size > 0:
+            licensePlateBase64 = image_to_base64(licensePlate)
+
+        # --- Obstacle Detection (Background Subtraction) ---
+        background_img = backgrounds.get(str(device_id), {}).get(slotIndex)
+        object_detected = False
+
+        if background_img is not None:
+            background_processed = preprocess_frame(background_img)
+            slot_frame_processed = preprocess_frame(slot_frame_gray)
+
+            # --- Ensure sizes match before calculating difference ---
+            bg_height, bg_width = background_processed.shape[:2]
+            sf_height, sf_width = slot_frame_processed.shape[:2]
+
+            slot_frame_processed_resized = None
+            if bg_height != sf_height or bg_width != sf_width:
+                 try:
+                     slot_frame_processed_resized = cv2.resize(slot_frame_processed, (bg_width, bg_height))
+                 except cv2.error as e:
+                     print(f"Error resizing slot frame for slot {slotIndex} in liveMode: {e}")
+            else:
+                 slot_frame_processed_resized = slot_frame_processed
+
+            if slot_frame_processed_resized is not None:
+                diff = cv2.absdiff(background_processed, slot_frame_processed_resized)
+                _, thresh = cv2.threshold(diff, 30, 255, cv2.THRESH_BINARY)
+                kernel = np.ones((5, 5), np.uint8)
+                thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+                thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+                object_detected = is_object_present(thresh)
+
+        # --- End Obstacle Detection ---
+
+        # --- Determine Final Slot Status ---
+        current_space_status = 'vacant'
+        current_license_plate_payload = ''
+
+        if object_detected and isLicensePlate:
+             current_space_status = 'occupied'
+             current_license_plate_payload = licensePlateBase64
+        elif object_detected and not isLicensePlate:
+             current_space_status = 'obstacle detected'
+             current_license_plate_payload = ''
+        elif not object_detected and isLicensePlate:
+             current_space_status = 'occupied'
+             current_license_plate_payload = licensePlateBase64
+
+        # Update confidence queue (using occupied status for pilot logic)
+        Variables.CONFIDENCE_QUEUE[slotIndex].enqueue(current_space_status == 'occupied')
+
+        # Get previous state for change detection
+        prev_space_data = device_slot_data.get(str(device_id), {}).get(slotIndex)
+        prev_space_status = prev_space_data['spaceStatus'] if prev_space_data else 'vacant'
+        prev_license_plate = prev_space_data['licensePlate'] if prev_space_data else ''
+
+        # Append current status for pilot light logic after the loop
+        processed_slots_data.append({"slotIndex": slotIndex, "spaceStatus": current_space_status})
+
+        # --- Only call update_server and save to DB if state has changed ---
+        if current_space_status != prev_space_status or current_license_plate_payload != prev_license_plate:
+             print(f'Live Mode State change detected for slot {slotIndex}: Status {prev_space_status} -> {current_space_status}, LP change: {prev_license_plate != current_license_plate_payload}. Calling update_server...')
+             update_server(slotIndex, current_space_status, current_license_plate_payload)
+
+             # Update database if status changed
+             try:
+                 space = SpaceInfo.objects.get(space_id=slotIndex)
+                 if space.space_status != current_space_status:
+                     print(f'Live Mode Database status change detected for slot {slotIndex}: {space.space_status} -> {current_space_status}')
+                     space.space_status = current_space_status
+                     space.save()
+             except SpaceInfo.DoesNotExist:
+                  print(f"Warning: SpaceInfo object not found for slotIndex {slotIndex} in liveMode. Cannot update database status.")
+             except Exception as e:
+                 print(f"Error updating database for slot {slotIndex} in liveMode: {e}")
+
+    # --- Pilot Update after processing all slots ---
+    if IS_PI_CAMERA_SOURCE:
+        try:
+            any_occupied = any(s['spaceStatus'] == 'occupied' for s in processed_slots_data)
+            if any_occupied:
+                 update_pilot('occupied')
+            else:
+                 update_pilot('vacant')
+        except Exception as e:
+            print(f"Error during pilot update after liveMode loop: {e}")
+
+    # liveMode runs continuously and does not return a value to a request handler.
 
 
 
@@ -263,11 +362,9 @@ def get_monitoring_spaces():
 
     # Dynamically get device_id for this system
     # Access device_slot_data from NetworkController for status comparison
-    from cpgsapp.controllers.NetworkController import device_slot_data
-    device_ids = list(Account.objects.values_list('device_id', flat=True))
-    if not device_ids:
-        device_ids = ["default"]
-    device_id = str(device_ids[0])  # Use the first device_id by default
+    # from cpgsapp.controllers.NetworkController import device_slot_data
+
+    device_id = get_device_id()  # Use the first device_id by default
 
     # List to collect processed slot data for the return value
     processed_slots_data = []
