@@ -174,6 +174,327 @@ def getSpaceMonitorWithLicensePlateDectection(x, y, w, h ):
 
 
 
+# Car detection model paths
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'models', 'yolov3-tiny.cfg')
+WEIGHTS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'models', 'yolov3-tiny.weights')
+CLASSES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'models', 'coco.names')
+
+# Initialize model variables
+net = None
+CLASSES = []
+output_layers = []
+
+def initialize_car_detection():
+    """
+    Initialize the car detection model and class labels.
+    Returns True if initialization was successful, False otherwise.
+    """
+    global net, CLASSES, output_layers
+    
+    try:
+        # Check if model files exist
+        if not all(os.path.exists(path) for path in [CONFIG_PATH, WEIGHTS_PATH, CLASSES_PATH]):
+            print("Error: One or more model files are missing. Please ensure all model files are present.")
+            print(f"Config path: {CONFIG_PATH}")
+            print(f"Weights path: {WEIGHTS_PATH}")
+            print(f"Classes path: {CLASSES_PATH}")
+            return False
+            
+        # Load class labels
+        with open(CLASSES_PATH, 'r') as f:
+            CLASSES = f.read().strip().split('\n')
+        print(f"Loaded {len(CLASSES)} class labels")
+            
+        # Load the pre-trained YOLOv3-tiny model
+        print("Loading YOLOv3-tiny model...")
+        net = cv2.dnn.readNetFromDarknet(CONFIG_PATH, WEIGHTS_PATH)
+        
+        # Set preferable backend and target
+        net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+        net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+        
+        # Get output layer names
+        layer_names = net.getLayerNames()
+        try:
+            output_layers = [layer_names[i - 1] for i in net.getUnconnectedOutLayers()]
+        except:
+            output_layers = [layer_names[i[0] - 1] for i in net.getUnconnectedOutLayers()]
+        
+        print(f"Model loaded successfully. Output layers: {output_layers}")
+        return True
+        
+    except Exception as e:
+        print(f"Error initializing car detection model: {str(e)}")
+        return False
+
+# Constants for car detection
+CONFIDENCE_THRESHOLD = 0.5
+CAR_CLASS_ID = 2  # COCO dataset class ID for car
+IOU_THRESHOLD = 0.3  # Intersection over Union threshold for wrong parking detection
+
+def is_wrong_parking(box, frame_shape):
+    """
+    Check if a car is parked incorrectly based on its position and orientation
+    Returns True if the car is parked incorrectly, False otherwise
+    """
+    height, width = frame_shape[:2]
+    x1, y1, x2, y2 = box
+    
+    # Calculate car dimensions and position
+    car_width = x2 - x1
+    car_height = y2 - y1
+    car_center_x = (x1 + x2) / 2
+    car_center_y = (y1 + y2) / 2
+    
+    # Calculate aspect ratio to determine car orientation
+    aspect_ratio = car_width / car_height if car_height > 0 else 0
+    
+    print(f"\nAnalyzing car position:")
+    print(f"Car dimensions: {car_width:.1f}x{car_height:.1f}")
+    print(f"Car center: ({car_center_x:.1f}, {car_center_y:.1f})")
+    print(f"Aspect ratio: {aspect_ratio:.2f}")
+    
+    # Define parking rules
+    wrong_parking = False
+    reasons = []
+    
+    # Rule 1: Check if car is too close to the edge of the frame
+    edge_margin = 50  # pixels
+    if x1 < edge_margin or x2 > (width - edge_margin):
+        wrong_parking = True
+        reasons.append("Car too close to horizontal edge")
+    
+    # Rule 2: Check if car is parked at an angle (using aspect ratio)
+    if aspect_ratio < 1.2 or aspect_ratio > 2.5:  # Normal cars have aspect ratio between 1.2 and 2.5
+        wrong_parking = True
+        reasons.append("Car appears to be parked at an angle")
+    
+    # Rule 3: Check if car is in the middle of the frame (should be in parking spot)
+    frame_center_x = width / 2
+    if abs(car_center_x - frame_center_x) > width * 0.3:  # Car should be within 30% of frame center
+        wrong_parking = True
+        reasons.append("Car not centered in parking spot")
+    
+    # Rule 4: Check if car is parked between two spaces
+    # Calculate expected parking space width (assuming standard parking space width)
+    expected_parking_width = width * 0.4  # Assuming parking space takes 40% of frame width
+    if car_width > expected_parking_width * 1.3:  # If car is 30% wider than expected
+        wrong_parking = True
+        reasons.append("Car appears to be parked between two spaces")
+        
+        # Additional check for position relative to parking space boundaries
+        parking_space_centers = [
+            width * 0.25,  # Left parking space center
+            width * 0.75   # Right parking space center
+        ]
+        
+        # Find closest parking space center
+        closest_center = min(parking_space_centers, key=lambda x: abs(x - car_center_x))
+        if abs(car_center_x - closest_center) > expected_parking_width * 0.3:
+            reasons.append("Car is not properly aligned with either parking space")
+    
+    if wrong_parking:
+        print("\n=== WRONG PARKING DETECTED ===")
+        print("Reasons:")
+        for reason in reasons:
+            print(f"- {reason}")
+        print(f"Expected parking width: {expected_parking_width:.1f} pixels")
+        print(f"Actual car width: {car_width:.1f} pixels")
+    else:
+        print("\nCar appears to be parked correctly")
+    
+    return wrong_parking
+
+# Add these at the top with other global variables
+detection_running = False
+last_detection_time = 0
+DETECTION_INTERVAL = 1.0  # Time between detections in seconds
+
+def start_car_detection():
+    """
+    Initialize and start the car detection system
+    """
+    global net, detection_running
+    
+    if not detection_running:
+        print("\n=== Initializing Car Detection System ===")
+        if initialize_car_detection():
+            detection_running = True
+            print("Car detection system initialized and running")
+            return True
+        else:
+            print("Failed to initialize car detection system")
+            return False
+    return True
+
+def detect_cars(frame):
+    """
+    Detect cars in the given frame using YOLOv3-tiny
+    Returns list of car bounding boxes (x1, y1, x2, y2)
+    """
+    global net, output_layers, detection_running, last_detection_time
+    
+    current_time = time.time()
+    
+    # Check if we should run detection based on interval
+    if current_time - last_detection_time < DETECTION_INTERVAL:
+        return []  # Return empty list if not time for detection yet
+    
+    last_detection_time = current_time
+    
+    # If model is not initialized, try to initialize it
+    if not detection_running:
+        if not start_car_detection():
+            return []
+    
+    try:
+        print("\n=== Processing Frame ===")
+        print(f"Time: {time.strftime('%H:%M:%S')}")
+        
+        # Convert grayscale to color if needed
+        if len(frame.shape) == 2:  # If grayscale
+            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+        
+        height, width = frame.shape[:2]
+        print(f"Frame size: {width}x{height}")
+        
+        # Create blob from image
+        blob = cv2.dnn.blobFromImage(frame, 1/255.0, (416, 416), swapRB=True, crop=False)
+        
+        # Set input and forward pass
+        net.setInput(blob)
+        outputs = net.forward(output_layers)
+        
+        # Process detections
+        car_boxes = []
+        boxes = []
+        confidences = []
+        detection_count = 0
+        
+        # Process each output layer
+        for output in outputs:
+            if len(output.shape) != 2:
+                continue
+            
+            for detection in output:
+                try:
+                    # Get scores for all classes
+                    scores = detection[5:]
+                    class_id = np.argmax(scores)
+                    confidence = float(scores[class_id])
+                    
+                    if confidence > CONFIDENCE_THRESHOLD and class_id == CAR_CLASS_ID:
+                        detection_count += 1
+                        # Get box coordinates
+                        center_x = int(detection[0] * width)
+                        center_y = int(detection[1] * height)
+                        w = int(detection[2] * width)
+                        h = int(detection[3] * height)
+                        
+                        # Calculate box corners
+                        x1 = int(center_x - w/2)
+                        y1 = int(center_y - h/2)
+                        x2 = int(center_x + w/2)
+                        y2 = int(center_y + h/2)
+                        
+                        # Ensure coordinates are within frame bounds
+                        x1 = max(0, x1)
+                        y1 = max(0, y1)
+                        x2 = min(width, x2)
+                        y2 = min(height, y2)
+                        
+                        print(f"\nCar #{detection_count} detected:")
+                        print(f"Position: ({x1}, {y1}) to ({x2}, {y2})")
+                        print(f"Size: {w}x{h} pixels")
+                        print(f"Confidence: {confidence:.2f}")
+                        
+                        # Check for wrong parking
+                        if is_wrong_parking((x1, y1, x2, y2), frame.shape):
+                            print("=== WRONG PARKING ALERT ===")
+                        
+                        # Add to lists
+                        boxes.append([x1, y1, x2, y2])
+                        confidences.append(confidence)
+                except Exception as e:
+                    print(f"Error processing detection: {str(e)}")
+                    continue
+        
+        # Only apply NMS if we have detections
+        if boxes and confidences:
+            try:
+                # Apply non-maximum suppression to remove overlapping boxes
+                indices = cv2.dnn.NMSBoxes(boxes, confidences, CONFIDENCE_THRESHOLD, 0.4)
+                
+                # Handle different types of indices
+                if isinstance(indices, np.ndarray):
+                    indices = indices.flatten().tolist()
+                elif isinstance(indices, tuple):
+                    indices = list(indices)
+                elif not isinstance(indices, list):
+                    indices = [indices]
+                
+                # Add non-suppressed boxes to car_boxes
+                for i in indices:
+                    if isinstance(i, (list, tuple)):
+                        i = i[0]  # Handle case where index is a list/tuple
+                    car_boxes.append(tuple(boxes[i]))
+                
+                print(f"\nDetection Summary:")
+                print(f"Total detections before NMS: {len(boxes)}")
+                print(f"Final unique cars after NMS: {len(car_boxes)}")
+                
+            except Exception as e:
+                print(f"Error in NMS: {str(e)}")
+                # If NMS fails, return all boxes
+                car_boxes = [tuple(box) for box in boxes]
+                print("Using all boxes due to NMS error")
+        else:
+            print("\nNo cars detected in this frame")
+        
+        return car_boxes
+        
+    except Exception as e:
+        print(f"Error in car detection: {str(e)}")
+        return []
+
+def calculate_iou(box1, box2):
+    """
+    Calculate Intersection over Union between two bounding boxes
+    """
+    x1 = max(box1[0], box2[0])
+    y1 = max(box1[1], box2[1])
+    x2 = min(box1[2], box2[2])
+    y2 = min(box1[3], box2[3])
+    
+    intersection = max(0, x2 - x1) * max(0, y2 - y1)
+    box1_area = (box1[2] - box1[0]) * (box1[3] - box1[1])
+    box2_area = (box2[2] - box2[0]) * (box2[3] - box2[1])
+    union = box1_area + box2_area - intersection
+    
+    return intersection / union if union > 0 else 0
+
+def detect_wrong_parking(car_boxes, parking_slots):
+    """
+    Detect wrong parking by checking if cars overlap with multiple parking slots
+    Returns dictionary mapping slot indices to wrong parking status
+    """
+    wrong_parking_status = {}
+    
+    for slot_idx, slot in enumerate(parking_slots):
+        slot_box = (slot[0][0], slot[0][1], slot[2][0], slot[2][1])
+        overlapping_slots = set()
+        
+        for car_box in car_boxes:
+            iou = calculate_iou(car_box, slot_box)
+            if iou > IOU_THRESHOLD:
+                overlapping_slots.add(slot_idx)
+        
+        if len(overlapping_slots) > 1:
+            for slot_idx in overlapping_slots:
+                wrong_parking_status[slot_idx] = "straddling"
+    
+    return wrong_parking_status
+
 # Function to start live mode and detect the available license plates
 def liveMode():
     '''
@@ -190,7 +511,13 @@ def liveMode():
     # Check if frame capture failed or returned an empty frame
     if current_frame is None or current_frame.size == 0:
          print("Failed to capture a valid frame for live mode monitoring.")
-         return # Return without processing if no frame captured
+         return
+
+    # Detect cars in the frame
+    car_boxes = detect_cars(current_frame)
+    
+    # Detect wrong parking
+    wrong_parking_status = detect_wrong_parking(car_boxes, poslist)
 
     # Ensure confidence queues are initialized for all potential slots
     for slotIndex in range(Variables.TOTALSPACES):
@@ -358,21 +685,18 @@ def get_monitoring_spaces():
          print("Failed to capture a valid frame for monitoring.")
          return [] # Return empty list if no frame captured
 
+    # Detect cars in the frame
+    car_boxes = detect_cars(current_frame)
+    
+    # Detect wrong parking
+    wrong_parking_status = detect_wrong_parking(car_boxes, poslist)
+
     # Ensure confidence queues are initialized for all potential slots
     for slotIndex in range(Variables.TOTALSPACES):
         if len(Variables.CONFIDENCE_QUEUE) <= slotIndex:
              Variables.CONFIDENCE_QUEUE.append(FixedFIFO(CONSISTENCY_LEVEL))
 
     # Initialize or update in-memory space info based on DB or defaults
-    # This call with an empty list might not be doing what's intended for initializing device_slot_data
-    # The NetworkController.initialize_device_slots_data() function seems more appropriate for initial setup.
-    # Consider reviewing the purpose of this specific update_space_info call here.
-    # update_space_info(Variables.SPACES) # Needs review if it's intended to initialize/update DB space info.
-
-    # Dynamically get device_id for this system
-    # Access device_slot_data from NetworkController for status comparison
-    # from cpgsapp.controllers.NetworkController import device_slot_data
-
     device_id = get_device_id()  # Use the first device_id by default
 
     # List to collect processed slot data for the return value
@@ -421,199 +745,115 @@ def get_monitoring_spaces():
              # Create a color version for drawing if needed
              slot_frame_color = cv2.cvtColor(slot_frame_crop, cv2.COLOR_GRAY2BGR)
 
-
         # --- License Plate Detection ---
-        # The function dectect_license_plate expects a grayscale image.
-        # It modifies the image in place to draw the rectangle.
-        # Pass a copy if you need the original grayscale crop later without drawings.
-        # However, for spaceFrame, we need the drawing, so we'll use a copy of the grayscale
-        # and then potentially draw on the color version. Let's simplify and draw on a copy
-        # of the color frame *after* determining status, if we need a visual indicator.
-        # For now, just detect LP on a copy of the gray frame.
         slot_frame_gray_for_lp = slot_frame_gray.copy()
         slot_with_lp_drawing, licensePlate, isLicensePlate = dectect_license_plate(slot_frame_gray_for_lp)
 
         licensePlateBase64 = ""
         if isLicensePlate and licensePlate is not None and licensePlate.size > 0:
-            # Generate base64 for the cropped license plate itself if detected and valid
             licensePlateBase64 = image_to_base64(licensePlate)
 
         # Generate base64 for the slot frame with license plate drawing
-        # We need to draw on a color image for better visualization if the original was grayscale.
-        # Let's draw the LP bounding box on the slot_frame_color copy.
         if isLicensePlate:
-             # Need to re-calculate LP bounding box relative to the original slot_frame_color if drawing here
-             # Or modify dectect_license_plate to also return the drawing on a color image.
-             # For simplicity now, let's use the slot_with_lp_drawing result (which is grayscale)
-             # and convert it to base64. If you need color drawings, dectect_license_plate needs to be updated.
-             spaceFrameBase64 = image_to_base64(slot_with_lp_drawing) # Using the grayscale image with drawing
+             spaceFrameBase64 = image_to_base64(slot_with_lp_drawing)
         else:
-             # If no license plate, just use the base64 of the original slot frame crop (color or gray converted to color)
-             spaceFrameBase64 = image_to_base64(slot_frame_color) # Using the color version (or gray converted to color)
-
+             spaceFrameBase64 = image_to_base64(slot_frame_color)
 
         # --- Obstacle Detection (Background Subtraction) ---
         background_img = backgrounds.get(str(device_id), {}).get(slotIndex)
         object_detected = False
-        # obstacleFrameBase64 = '' # Variable to store base64 of frame with obstacle drawing if needed
 
         if background_img is not None:
-            # Both background_img and slot_frame_gray are grayscale here.
-            # Preprocess them (gaussian blur, equalize hist)
-            background_processed = preprocess_frame(background_img) 
-            slot_frame_processed = preprocess_frame(slot_frame_gray)
+            try:
+                # Process background and current frame
+                background_processed = preprocess_frame(background_img)
+                slot_frame_processed = preprocess_frame(slot_frame_gray)
 
-            # --- Ensure sizes match before calculating difference ---
-            # Get dimensions of the background image (after preprocessing)
-            bg_height, bg_width = background_processed.shape[:2]
-            sf_height, sf_width = slot_frame_processed.shape[:2]
+                # Ensure both frames have the same dimensions
+                bg_height, bg_width = background_processed.shape
+                slot_height, slot_width = slot_frame_processed.shape
 
-            # Only resize if dimensions don't match
-            if bg_height != sf_height or bg_width != sf_width:
-                 try:
-                     # Resize slot_frame_processed to match the background size
-                     slot_frame_processed_resized = cv2.resize(slot_frame_processed, (bg_width, bg_height))
-                     # print(f"Resized slot frame for slot {slotIndex} from {sf_width}x{sf_height} to match background {bg_width}x{bg_height}.") # Uncomment for debugging
-                 except cv2.error as e:
-                     print(f"Error resizing slot frame for slot {slotIndex}: {e}")
-                     # If resize fails, cannot perform diff, treat as no object detected for this slot
-                     object_detected = False
-                     slot_frame_processed_resized = None # Set to None to avoid using invalid data
-            else:
-                 slot_frame_processed_resized = slot_frame_processed # No resizing needed
+                if bg_height != slot_height or bg_width != slot_width:
+                    slot_frame_processed_resized = cv2.resize(slot_frame_processed, (bg_width, bg_height))
+                else:
+                    slot_frame_processed_resized = slot_frame_processed
 
-            # Only proceed with diff calculation if resizing was successful or not needed
-            if slot_frame_processed_resized is not None:
-                # Calculate difference using size-matched processed frames
-                diff = cv2.absdiff(background_processed, slot_frame_processed_resized)
-                _, thresh = cv2.threshold(diff, 30, 255, cv2.THRESH_BINARY)
-                kernel = np.ones((5, 5), np.uint8)
-                # Apply morphological operations to clean up the thresholded image
-                thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel) # Opening to remove small objects/noise
-                thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel) # Closing to fill small holes
+                if slot_frame_processed_resized is not None:
+                    diff = cv2.absdiff(background_processed, slot_frame_processed_resized)
+                    _, thresh = cv2.threshold(diff, 30, 255, cv2.THRESH_BINARY)
+                    kernel = np.ones((5, 5), np.uint8)
+                    thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+                    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+                    object_detected = is_object_present(thresh)
+            except Exception as e:
+                print(f"Error in obstacle detection for slot {slotIndex}: {e}")
 
-                # Determine if an object is present based on the thresholded image
-                # This function checks pixel change and contour area
-                object_detected = is_object_present(thresh)
+        # --- Determine Final Slot Status ---
+        current_space_status = 'vacant'
+        current_license_plate_payload = ''
 
-                # Optional: Draw obstacle contours on a color version of the original slot crop for visualization
-                # if object_detected:
-                #     # Need to find contours on the potentially resized threshold image (thresh)
-                #     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                #     # To draw on the original slot_frame_color, contour coordinates would need scaling
-                #     # For simplicity, let's generate base64 of the thresh image itself or draw on the resized processed frame.
-                #     # If you need drawings on the original color frame, the logic here needs to be more complex (scaling contours).
-                #     # As an alternative, we can draw on the original slot_frame_color based on the bounding box of the *entire* slot where the object was detected.
-                #     # But the requirement is to show the "spaceFrame" which is the slot crop.
-                #     # Let's stick to providing the slot frame with LP drawing (spaceFrameBase64 calculated earlier) for spaceFrame key.
-                #     pass # Drawing logic moved/simplified
-
-
-        # --- End Obstacle Detection ---
-
-        # --- Determine Final Slot Status based on Obstacle and License Plate Detection ---
-        current_space_status = 'vacant' # Default status
-        current_license_plate_payload = '' # Default empty license plate payload
-
-        if object_detected and isLicensePlate:
-             # If both obstacle and license plate are detected, it's an occupied slot
-             current_space_status = 'occupied'
-             current_license_plate_payload = licensePlateBase64 # Include detected LP
+        # Check for wrong parking first
+        if slotIndex in wrong_parking_status:
+            current_space_status = wrong_parking_status[slotIndex]
+        elif object_detected and isLicensePlate:
+            current_space_status = 'occupied'
+            current_license_plate_payload = licensePlateBase64
         elif object_detected and not isLicensePlate:
-             # If obstacle detected but no license plate, it's an obstacle
-             current_space_status = 'obstacle detected'
-             current_license_plate_payload = '' # No license plate for obstacles
-        # elif not object_detected and isLicensePlate:
-        #      # If no obstacle detected but license plate found, treat as occupied
-        #      current_space_status = 'occupied'
-        #      current_license_plate_payload = licensePlateBase64 # Include detected LP
-        # else (not object_detected and not isLicensePlate): status remains 'vacant'
+            current_space_status = 'obstacle detected'
+            current_license_plate_payload = ''
 
-        # Update confidence queue based on whether it's considered occupied for pilot light logic
-        # Enqueue True if status is 'occupied', False otherwise.
+        # Update confidence queue
         Variables.CONFIDENCE_QUEUE[slotIndex].enqueue(current_space_status == 'occupied')
 
-        # Recalculate confidence levels after enqueueing
-        queue = Variables.CONFIDENCE_QUEUE[slotIndex].get_queue()
-        Occupied_count = queue.count(True)
-        Vaccency_count = queue.count(False)
-        # Confidence levels are not directly used to set the main status in this revised logic,
-        # but are kept for potential future use or pilot light logic if it uses confidence.
-        Occupied_confidence = int((Occupied_count/CONSISTENCY_LEVEL)*100)
-        Vaccency_confidence = int((Vaccency_count/CONSISTENCY_LEVEL)*100)
-
-        # --- End Determine Final Slot Status ---
-
-        # Get the previous status from in-memory data for change detection
-        prev_space_data = device_slot_data.get(device_id, {}).get(slotIndex)
-        # Use 'vacant' as default if slot data doesn't exist yet (first run)
+        # Get previous state for change detection
+        prev_space_data = device_slot_data.get(str(device_id), {}).get(slotIndex)
         prev_space_status = prev_space_data['spaceStatus'] if prev_space_data else 'vacant'
-        # Also get previous license plate to see if it changed
         prev_license_plate = prev_space_data['licensePlate'] if prev_space_data else ''
 
-
-        # Create the slot data dictionary for the current state (for return value)
-        slot_data = {
+        # Append current status for pilot light logic
+        processed_slots_data.append({
             "slotIndex": slotIndex,
             "spaceStatus": current_space_status,
-            "spaceFrame": spaceFrameBase64, # Include the base64 image of the slot frame (with LP drawing if detected)
-            "licensePlate": current_license_plate_payload # Use the determined payload license plate
-        }
+            "spaceFrame": spaceFrameBase64,
+            "licensePlate": current_license_plate_payload
+        })
 
-        # Append the processed slot data to the list for the return value
-        processed_slots_data.append(slot_data)
+        # --- Only call update_server and save to DB if state has changed ---
+        if current_space_status != prev_space_status:
+            print(f'Monitoring State change detected for slot {slotIndex}: Status {prev_space_status} -> {current_space_status}, LP change: {prev_license_plate != current_license_plate_payload}. Calling update_server...')
+            update_server(slotIndex, current_space_status, current_license_plate_payload)
 
-        # --- Only call update_server and save to DB if status or license plate has changed ---
-        # This prevents continuous sending when status and LP are stable
-        # Check if either status or the *payload* license plate has changed
-        if current_space_status != prev_space_status :
-             print(f'Status or License Plate change detected for slot {slotIndex}: Status {prev_space_status} -> {current_space_status}, LP change: {prev_license_plate != current_license_plate_payload}. Calling update_server...')
-
-             # Update the in-memory state and send via MQTT using the existing function
-             # The update_server function handles updating device_slot_data and publishing.
-             update_server(slotIndex, current_space_status, current_license_plate_payload) # Pass the LP payload
-
-             # Update database if status changed (only status stored in SpaceInfo model)
-             # Note: License plate is not stored in SpaceInfo based on your model. Only update status if it changed.
-             # Fetch the SpaceInfo object for the current slot if needed for DB update
-             try:
-                 space = SpaceInfo.objects.get(space_id=slotIndex)
-                 if space.space_status != current_space_status:
-                     print(f'Database status change detected for slot {slotIndex}: {space.space_status} -> {current_space_status}')
-                     space.space_status = current_space_status
-                     space.save()
-             except SpaceInfo.DoesNotExist:
-                  print(f"Warning: SpaceInfo object not found for slotIndex {slotIndex}. Cannot update database status.")
-             except Exception as e:
-                 print(f"Error updating database for slot {slotIndex}: {e}")
-        # else: No action needed if both status and license plate are stable
-
+            # Update database if status changed
+            try:
+                space = SpaceInfo.objects.get(space_id=slotIndex)
+                if space.space_status != current_space_status:
+                    print(f'Monitoring Database status change detected for slot {slotIndex}: {space.space_status} -> {current_space_status}')
+                    space.space_status = current_space_status
+                    space.save()
+            except SpaceInfo.DoesNotExist:
+                print(f"Warning: SpaceInfo object not found for slotIndex {slotIndex} in monitoring. Cannot update database status.")
+            except Exception as e:
+                print(f"Error updating database for slot {slotIndex} in monitoring: {e}")
 
     # --- Pilot Update after processing all slots ---
-    # If pilot status depends on the status of ALL slots, update it once after the loop.
-    # This is a more efficient location for the pilot update logic if needed.
     if IS_PI_CAMERA_SOURCE:
         try:
             spaces = SpaceInfo.objects.all()
             Variables.pilotStatusofEachSpace = []
             for space in spaces:
-                # Consider a space 'occupied' for pilot light if status is 'occupied' or 'obstacle detected'
-                if space.space_status == "occupied" or space.space_status == "obstacle detected":
+                # Consider a space 'occupied' for pilot light if status is 'occupied', 'obstacle detected', or 'straddling'
+                if space.space_status in ["occupied", "obstacle detected", "straddling"]:
                     Variables.pilotStatusofEachSpace.append(True)
                 else:
                     Variables.pilotStatusofEachSpace.append(False)
 
-            # print(Variables.pilotStatusofEachSpace) # Uncomment if you want to see the list
             if(all(Variables.pilotStatusofEachSpace)):
                 update_pilot('occupied')
             else:
-                update_pilot('vacant') # Corrected typo
+                update_pilot('vacant')
         except Exception as e:
-            print(f"Error during pilot update after liveMode loop: {e}")
-#---------------------------------------------- End Pilot Update ---
+            print(f"Error during pilot update after monitoring loop: {e}")
 
-    # Return the list of processed slot data
-    # The MQTT sending is handled by update_server within the loop, only on change.
     return processed_slots_data
 
 
@@ -739,5 +979,12 @@ def is_object_present(thresh, contour_area_threshold=500, pixel_change_threshold
     
     return enough_pixel_change and has_contours
 
+def stop_car_detection():
+    """
+    Stop the car detection system
+    """
+    global detection_running
+    detection_running = False
+    print("\n=== Car Detection System Stopped ===")
 
 # End of Object detection functions :
