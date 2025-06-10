@@ -359,6 +359,9 @@ def detect_cars(frame):
         height, width = frame.shape[:2]
         print(f"Frame size: {width}x{height}")
         
+        # Get parking slot coordinates
+        poslist = get_space_coordinates()
+        
         # Create blob from image
         blob = cv2.dnn.blobFromImage(frame, 1/255.0, (416, 416), swapRB=True, crop=False)
         
@@ -412,6 +415,32 @@ def detect_cars(frame):
                         # Check for wrong parking
                         if is_wrong_parking((x1, y1, x2, y2), frame.shape):
                             print("=== WRONG PARKING ALERT ===")
+                            
+                            # Find which slot the car is in
+                            car_center = (center_x, center_y)
+                            max_iou = 0
+                            detected_slot = 0
+                            
+                            for slot_idx, slot_coords in enumerate(poslist):
+                                # Convert slot coordinates to match resized frame
+                                slot_x1 = int(slot_coords[0][0] * (320/1280))  # Scale from original 1280x720 to 320x200
+                                slot_y1 = int(slot_coords[0][1] * (200/720))
+                                slot_x2 = int(slot_coords[2][0] * (320/1280))
+                                slot_y2 = int(slot_coords[2][1] * (200/720))
+                                
+                                # Calculate IOU between car and slot
+                                slot_box = (slot_x1, slot_y1, slot_x2, slot_y2)
+                                car_box = (x1, y1, x2, y2)
+                                iou = calculate_iou(car_box, slot_box)
+                                
+                                if iou > max_iou:
+                                    max_iou = iou
+                                    detected_slot = slot_idx
+                            
+                            # Update MQTT server with wrong parking status for the detected slot
+                            if max_iou > 0:  # Only update if we found a matching slot
+                                print(f"Wrong parking detected in slot {detected_slot}")
+                                update_server(detected_slot, "wrong parking", "")
                         
                         # Add to lists
                         boxes.append([x1, y1, x2, y2])
@@ -453,7 +482,7 @@ def detect_cars(frame):
             print("\nNo cars detected in this frame")
         
         # Add a 5-second delay after detection
-        time.sleep(5)
+        time.sleep(1)
         
         return car_boxes
         
