@@ -35,17 +35,7 @@ if IS_PI_CAMERA_SOURCE:
     Variables.cap.start()
     print("Using Pi Camera")
 else:
-    # Try external camera (1) first
-    Variables.cap = cv2.VideoCapture(1)
-    if Variables.cap.isOpened():
-        print("Using external camera")
-    else:
-        # If external camera fails, try internal camera (0)
-        Variables.cap = cv2.VideoCapture(0)
-        if Variables.cap.isOpened():
-            print("Using internal camera")
-        else:
-            print("No camera available")
+    Variables.cap = cv2.VideoCapture(0)
 
 
 def image_to_base64(frame):
