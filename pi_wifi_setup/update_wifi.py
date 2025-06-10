@@ -4,9 +4,6 @@ import sys
 import time
 import signal
 
-def timeout_handler(signum, frame):
-    raise TimeoutError("Command timed out")
-
 def run_command_with_timeout(cmd, timeout=10):
     """Run a command with a timeout"""
     try:
@@ -30,11 +27,14 @@ def run_command_with_timeout(cmd, timeout=10):
         # Ensure alarm is disabled
         signal.alarm(0)
 
+def timeout_handler(signum, frame):
+    raise TimeoutError("Command timed out")
+
 def update_wifi_config(ssid, password):
     """Update WiFi configuration on Raspberry Pi"""
     try:
         # First, check if the network exists
-        print(f"Scanning for WiFi network: {ssid}")
+        print(f"\nScanning for WiFi network: {ssid}")
         subprocess.run("sudo nmcli dev wifi rescan", shell=True, check=True)
         time.sleep(2)  # Wait for scan to complete
         
@@ -51,22 +51,19 @@ def update_wifi_config(ssid, password):
             return False
             
         # Update the preconfigured connection
-        print("Updating WiFi configuration...")
+        print("\nUpdating WiFi configuration...")
         
-        # First, try to bring down the connection with a timeout
-        print("Disconnecting current connection...")
-        down_result = run_command_with_timeout('sudo nmcli connection down "preconfigured"', timeout=5)
-        if down_result is None:
-            print("Warning: Could not disconnect current connection, proceeding anyway...")
-        
-        # Wait a moment before proceeding
-        time.sleep(2)
+        # Create a new connection profile for the new network
+        print("Creating new connection profile...")
+        create_cmd = f'sudo nmcli connection add type wifi con-name "preconfigured" ifname wlan0 ssid "{ssid}"'
+        run_command_with_timeout(create_cmd)
         
         # Update the connection settings
         commands = [
-            f'sudo nmcli connection modify "preconfigured" wifi.ssid "{ssid}"',
+            f'sudo nmcli connection modify "preconfigured" wifi-sec.key-mgmt wpa-psk',
             f'sudo nmcli connection modify "preconfigured" wifi-sec.psk "{password}"',
-            'sudo nmcli connection modify "preconfigured" connection.autoconnect yes'
+            'sudo nmcli connection modify "preconfigured" connection.autoconnect yes',
+            'sudo nmcli connection modify "preconfigured" ipv4.method auto'
         ]
         
         for cmd in commands:
@@ -75,16 +72,20 @@ def update_wifi_config(ssid, password):
             if result is None:
                 print(f"Warning: Command failed: {cmd}")
                 continue
+
+        print("\nWiFi configuration updated successfully!")
+        print("\n=== IMPORTANT: READ THESE INSTRUCTIONS ===")
+        print("1. The new WiFi configuration has been saved")
+        print("2. To apply the changes, you need to reboot:")
+        print("   sudo reboot")
+        print("\nAfter reboot:")
+        print("1. The device will automatically connect to the new network")
+        print("2. Connect to the new WiFi network on your computer")
+        print("3. SSH into the device using the new IP address")
+        print("\nCurrent IP address(es):")
+        subprocess.run("ip addr show | grep 'inet ' | grep -v '127.0.0.1'", shell=True)
+        print("\nRemember to update your SSH connection to use the new IP address after reconnecting!")
         
-        # Try to bring up the connection
-        print("Connecting to new network...")
-        up_result = run_command_with_timeout('sudo nmcli connection up "preconfigured"', timeout=15)
-        if up_result is None:
-            print("Warning: Could not establish connection immediately")
-            print("The connection will be attempted automatically")
-        
-        print("WiFi configuration updated successfully!")
-        print("The system will attempt to connect to the new network")
         return True
         
     except Exception as e:
@@ -101,8 +102,7 @@ if __name__ == "__main__":
     password = sys.argv[2]
     
     if update_wifi_config(ssid, password):
-        print("WiFi configuration completed successfully!")
-        print("You may need to reboot for changes to take full effect")
+        print("\nWiFi configuration completed successfully!")
     else:
-        print("Failed to update WiFi configuration")
-        sys.exit(1) 
+        print("\nFailed to update WiFi configuration")
+        sys.exit(1)
