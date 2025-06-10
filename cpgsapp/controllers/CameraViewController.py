@@ -25,6 +25,13 @@ from cpgsapp.controllers.Device_id_config import get_device_id
 # Initialize PaddleOCR once at module level
 # ocr = PaddleOCR(use_angle_cls=True, lang='en')
 # Camera Input Setup
+# Constants for car detection
+CONFIDENCE_THRESHOLD = 0.5
+CAR_CLASS_ID = 2  # COCO dataset class ID for car
+IOU_THRESHOLD = 0.3  # Intersection over Union threshold for wrong parking detection
+detection_running = False
+last_detection_time = 0
+DETECTION_INTERVAL = 1.0  # Time between detections in seconds
 
 
 if IS_PI_CAMERA_SOURCE:
@@ -35,8 +42,7 @@ if IS_PI_CAMERA_SOURCE:
     Variables.cap.start()
     print("Using Pi Camera")
 else:
-    Variables.cap = cv2.VideoCapture(0)
-
+    Variables.cap = cv2.VideoCapture(1)
 
 def image_to_base64(frame):
     try:
@@ -227,11 +233,6 @@ def initialize_car_detection():
         print(f"Error initializing car detection model: {str(e)}")
         return False
 
-# Constants for car detection
-CONFIDENCE_THRESHOLD = 0.5
-CAR_CLASS_ID = 2  # COCO dataset class ID for car
-IOU_THRESHOLD = 0.3  # Intersection over Union threshold for wrong parking detection
-
 def is_wrong_parking(box, frame_shape):
     """
     Check if a car is parked incorrectly based on its position and orientation
@@ -305,10 +306,7 @@ def is_wrong_parking(box, frame_shape):
     
     return wrong_parking
 
-# Add these at the top with other global variables
-detection_running = False
-last_detection_time = 0
-DETECTION_INTERVAL = 1.0  # Time between detections in seconds
+
 
 def start_car_detection():
     """
@@ -354,6 +352,9 @@ def detect_cars(frame):
         # Convert grayscale to color if needed
         if len(frame.shape) == 2:  # If grayscale
             frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+        
+        # Resize frame to lower resolution for faster processing
+        frame = cv2.resize(frame, (320, 200))
         
         height, width = frame.shape[:2]
         print(f"Frame size: {width}x{height}")
@@ -450,6 +451,9 @@ def detect_cars(frame):
                 print("Using all boxes due to NMS error")
         else:
             print("\nNo cars detected in this frame")
+        
+        # Add a 5-second delay after detection
+        time.sleep(5)
         
         return car_boxes
         
